@@ -1,0 +1,657 @@
+{% extends "base.html" %}
+
+{% block title %}PCMPrivateClipManager - Documentos Markdown & PDF{% endblock %}
+
+{% block extra_css %}
+<!-- Motor matemático KaTeX local -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/katex.min.css') }}">
+<!-- Estilos del módulo -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/documentos.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="docs-container" 
+     data-url-subir="{{ url_for('clips.api_subir_imagen_documento') }}"
+     data-url-imagenes="{{ url_for('clips.api_listar_imagenes_documentos') }}">
+
+    <!-- Barra de herramientas superior -->
+    <header class="docs-toolbar no-print">
+        <div class="toolbar-left">
+            <a href="{{ url_for('clips.documentos') }}" class="btn-doc-back" title="Volver a la biblioteca">
+                ← Volver
+            </a>
+            <input type="hidden" id="docId" value="{{ doc['id'] if doc else '' }}">
+            <input type="text" id="docTitulo" class="doc-title-input" 
+                   placeholder="Título del documento..." 
+                   value="{{ doc['titulo'] if doc else '' }}" autocomplete="off">
+            <span id="saveStatus" class="save-status-badge">🟢 Listo</span>
+        </div>
+
+        <div class="toolbar-actions">
+            <button type="button" class="btn-doc-save" onclick="guardarDocumento()" title="Guardar cambios (Ctrl + S)">
+                💾 Guardar
+            </button>
+            <button type="button" class="btn-doc-tool" onclick="abrirModalImagenes()" title="Galería y gestor de imágenes">
+                🖼️ Imágenes
+            </button>
+            <button type="button" class="btn-doc-tool" onclick="insertarSaltoPagina()" title="Insertar un corte de página para el PDF">
+                ✂️ Salto A4
+            </button>
+            <button type="button" class="btn-doc-tool" onclick="insertarEjemploMath()" title="Cargar ejemplo con fórmulas y tablas">
+                📐 Ejemplo
+            </button>
+            <button type="button" class="btn-doc-tool" onclick="copiarMarkdown(this)">
+                📋 Copiar MD
+            </button>
+            <button type="button" class="btn-doc-tool" onclick="limpiarEditor()">
+                🗑️ Limpiar
+            </button>
+            <button type="button" class="btn-doc-print" onclick="exportarPDF()">
+                🖨️ Exportar a PDF
+            </button>
+        </div>
+    </header>
+
+    <!-- Espacio de trabajo dividido -->
+    <div class="docs-workspace">
+        
+        <!-- Panel 1: Editor Markdown -->
+        <section class="docs-panel editor-panel no-print">
+            <div class="panel-header">
+                <span>✏️ Editor Markdown & LaTeX</span>
+                <span id="docStats" class="panel-stats">0 palabras · 0 caracteres</span>
+            </div>
+            <textarea id="docInput" class="doc-textarea" 
+                      placeholder="Pega aquí texto, fórmulas KaTeX ($...$), tablas o pega imágenes directamente con Ctrl + V..." 
+                      spellcheck="false" autofocus>{{ doc['contenido'] if doc else '' }}</textarea>
+        </section>
+
+        <!-- Panel 2: Vista previa renderizada -->
+        <section class="docs-panel preview-panel">
+            <div class="panel-header no-print">
+                <span>👁️ Vista Previa Renderizada</span>
+                <span class="badge-ready">✓ Clic para sincronizar editor</span>
+            </div>
+            
+            <div id="docOutput" class="doc-rendered-sheet"></div>
+        </section>
+
+    </div>
+
+</div>
+
+<!-- Input de archivo oculto para subir imágenes de Windows -->
+<input type="file" id="fileInputImagen" accept="image/png, image/jpeg, image/webp, image/gif, image/svg+xml" style="display: none;">
+
+<!-- MODAL GESTOR DE IMÁGENES -->
+<div id="modalImagenes" class="doc-modal-overlay" style="display: none;">
+    <div class="doc-modal-container modal-gallery-container">
+        <header class="doc-modal-header no-print">
+            <h3 class="doc-modal-title">🖼️ Gestor de Imágenes del Documento</h3>
+            <div class="doc-modal-actions">
+                <button type="button" class="btn-modal-action" onclick="seleccionarArchivoImagen()">
+                    📤 Subir desde PC
+                </button>
+                <button type="button" class="btn-modal-close" onclick="cerrarModalImagenes()">✕</button>
+            </div>
+        </header>
+
+        <div class="modal-gallery-body">
+            <p class="gallery-hint">También puedes pegar capturas directamente con <strong>Ctrl + V</strong> o arrastrar fotos sobre el editor de texto.</p>
+            <div id="contenedorGaleria" class="gallery-grid">
+                <!-- Se rellena vía fetch -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Librerías locales descargadas -->
+<script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/purify.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/katex.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/marked-footnote.min.js') }}"></script>
+
+<script>
+    const input = document.getElementById("docInput");
+    const output = document.getElementById("docOutput");
+    const tituloInput = document.getElementById("docTitulo");
+    const docStats = document.getElementById("docStats");
+    const saveStatus = document.getElementById("saveStatus");
+    const fileInputImagen = document.getElementById("fileInputImagen");
+    const modalImagenes = document.getElementById("modalImagenes");
+    const contenedorGaleria = document.getElementById("contenedorGaleria");
+
+    // URLs obtenidas de forma limpia desde atributos del contenedor
+    const docsContainer = document.querySelector(".docs-container");
+    const URL_SUBIR_IMG = docsContainer.getAttribute("data-url-subir");
+    const URL_LISTAR_IMG = docsContainer.getAttribute("data-url-imagenes");
+
+    // ID del documento cargado (null si es nuevo)
+    const docIdInput = document.getElementById("docId");
+    let currentDocId = docIdInput && docIdInput.value ? parseInt(docIdInput.value, 10) : null;
+    let hayCambiosSinGuardar = false;
+
+    if (window.marked) {
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
+
+        if (typeof markedFootnote === "function") {
+            marked.use(markedFootnote());
+        }
+    }
+
+    // Motor Token Shield
+    function renderizarDocumento() {
+        const rawText = input.value;
+
+        if (!rawText.trim()) {
+            output.innerHTML = '<p class="empty-render-msg no-print">El documento formateado se previsualizará aquí en tiempo real...</p>';
+            actualizarMetricas(0, 0);
+            return;
+        }
+
+        const mathTokens = [];
+        const codeTokens = [];
+        const escapedDollars = [];
+        let mathIndex = 0;
+        let codeIndex = 0;
+        let dollarIndex = 0;
+        let texto = rawText;
+
+        // 1. Bloques de código
+        texto = texto.replace(/(```[\s\S]*?```)/g, (match) => {
+            const key = `@@CODEBLOCK_${codeIndex++}@@`;
+            codeTokens.push({ key, val: match });
+            return key;
+        });
+
+        texto = texto.replace(/(`[^`\n]+?`)/g, (match) => {
+            const key = `@@CODEINLINE_${codeIndex++}@@`;
+            codeTokens.push({ key, val: match });
+            return key;
+        });
+
+        // 2. Dólares literales escapados (\$)
+        texto = texto.replace(/\\\$/g, () => {
+            const key = `@@DOLLAR_LITERAL_${dollarIndex++}@@`;
+            escapedDollars.push({ key, val: "$" });
+            return key;
+        });
+
+        // 3. Salto de página manual seguro
+        texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');
+
+        // 4. Bloques matemáticos
+        texto = texto.replace(/\$\$([\s\S]*?)\$\$/g, (match, expr) => {
+            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: true });
+            return `\n\n${key}\n\n`;
+        });
+
+        texto = texto.replace(/(?:^|\n)[ \t]*\\\[([\s\S]*?)\\\][ \t]*(?:\n|$)/g, (match, expr) => {
+            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: true });
+            return `\n\n${key}\n\n`;
+        });
+
+        // 5. Fórmulas inline acotadas a la misma línea
+        texto = texto.replace(/\\\(([\s\S]*?)\\\)/g, (match, expr) => {
+            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: false });
+            return key;
+        });
+
+        texto = texto.replace(/(?<![\$\w\\])\$([^\s\$\n](?:[^\$\n]*?[^\s\$\n])?)\$(?![\$\w])/g, (match, expr) => {
+            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: false });
+            return key;
+        });
+
+        // 6. Restaurar código y caracteres protegidos
+        codeTokens.forEach(item => {
+            texto = texto.replace(item.key, item.val);
+        });
+
+        escapedDollars.forEach(item => {
+            texto = texto.replace(item.key, item.val);
+        });
+
+        // 7. Parsear Markdown y Sanitizar
+        let parsedHtml = marked.parse(texto);
+        let safeHtml = DOMPurify.sanitize(parsedHtml, {
+            ADD_TAGS: ['div', 'span', 'p', 'img'],
+            ADD_ATTR: ['width', 'height', 'align', 'style', 'class']
+        });
+
+        // 8. Inyectar KaTeX
+
+        // 8. Inyectar KaTeX
+        mathTokens.forEach(tok => {
+            let rendered = "";
+            try {
+                rendered = katex.renderToString(tok.expr.trim(), {
+                    displayMode: tok.display,
+                    throwOnError: false
+                });
+            } catch (err) {
+                rendered = `<span class="katex-error">${tok.expr}</span>`;
+            }
+
+            if (tok.display) {
+                const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+                if (pWrapper.test(safeHtml)) {
+                    safeHtml = safeHtml.replace(pWrapper, `<div class="katex-display-wrapper">${rendered}</div>`);
+                } else {
+                    safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), `<div class="katex-display-wrapper">${rendered}</div>`);
+                }
+            } else {
+                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), rendered);
+            }
+        });
+
+        output.innerHTML = safeHtml;
+
+        const palabras = rawText.trim() === "" ? 0 : rawText.trim().split(/\s+/).length;
+        actualizarMetricas(palabras, rawText.length);
+    }
+
+    function actualizarMetricas(palabras, caracteres) {
+        docStats.textContent = `${palabras.toLocaleString()} palabras · ${caracteres.toLocaleString()} caracteres`;
+    }
+
+    function marcarModificado() {
+        hayCambiosSinGuardar = true;
+        saveStatus.textContent = "🟡 Sin guardar";
+        saveStatus.className = "save-status-badge status-unsaved";
+    }
+
+    input.addEventListener("input", () => {
+        marcarModificado();
+        renderizarDocumento();
+    });
+
+    tituloInput.addEventListener("input", marcarModificado);
+
+    // ==========================================
+    // SUBIDA Y GESTIÓN DE IMÁGENES (QoL)
+    // ==========================================
+
+    function insertarTextoEnCursor(texto) {
+        const start = input.selectionStart;
+        const end = input.selectionEnd;
+        const contenido = input.value;
+        input.value = contenido.substring(0, start) + texto + contenido.substring(end);
+        input.selectionStart = input.selectionEnd = start + texto.length;
+        marcarModificado();
+        renderizarDocumento();
+        input.focus();
+    }
+
+    async function subirArchivoImagen(file) {
+        if (!file || !file.type.startsWith("image/")) {
+            alert("Por favor selecciona un archivo de imagen válido.");
+            return;
+        }
+
+        saveStatus.textContent = "⏳ Subiendo imagen...";
+        saveStatus.className = "save-status-badge status-saving";
+
+        const formData = new FormData();
+        formData.append("imagen", file);
+
+        try {
+            const resp = await fetch(URL_SUBIR_IMG, {
+                method: "POST",
+                body: formData
+            });
+
+            const data = await resp.json();
+            if (data.ok) {
+                insertarTextoEnCursor(`\n\n![${data.nombre}](${data.url})\n\n`);
+                saveStatus.textContent = "🟢 Imagen adjuntada";
+                saveStatus.className = "save-status-badge status-saved";
+                setTimeout(() => {
+                    saveStatus.textContent = hayCambiosSinGuardar ? "🟡 Sin guardar" : "🟢 Listo";
+                    saveStatus.className = hayCambiosSinGuardar ? "save-status-badge status-unsaved" : "save-status-badge";
+                }, 2000);
+            } else {
+                alert(data.error || "No se pudo subir la imagen.");
+                saveStatus.textContent = "🔴 Error de subida";
+                saveStatus.className = "save-status-badge status-error";
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error de conexión al subir la imagen.");
+            saveStatus.textContent = "🔴 Error de red";
+            saveStatus.className = "save-status-badge status-error";
+        }
+    }
+
+    // 1. Pegado directo (Ctrl + V)
+    input.addEventListener("paste", (e) => {
+        const items = (e.clipboardData || window.clipboardData).items;
+        for (let item of items) {
+            if (item.type.indexOf("image") !== -1) {
+                const blob = item.getAsFile();
+                e.preventDefault();
+                subirArchivoImagen(blob);
+                break;
+            }
+        }
+    });
+
+    // 2. Arrastrar y soltar sobre el editor (Drag & Drop)
+    input.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        input.classList.add("textarea-dragover");
+    });
+
+    input.addEventListener("dragleave", () => {
+        input.classList.remove("textarea-dragover");
+    });
+
+    input.addEventListener("drop", (e) => {
+        e.preventDefault();
+        input.classList.remove("textarea-dragover");
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            const file = e.dataTransfer.files[0];
+            if (file.type.startsWith("image/")) {
+                subirArchivoImagen(file);
+            }
+        }
+    });
+
+    // 3. Subida desde explorador de Windows
+    function seleccionarArchivoImagen() {
+        fileInputImagen.click();
+    }
+
+    fileInputImagen.addEventListener("change", () => {
+        if (fileInputImagen.files && fileInputImagen.files[0]) {
+            subirArchivoImagen(fileInputImagen.files[0]);
+            cerrarModalImagenes();
+            fileInputImagen.value = "";
+        }
+    });
+
+// 4. Modal de galería
+    async function abrirModalImagenes() {
+        modalImagenes.style.display = "flex";
+        document.body.style.overflow = "hidden";
+        contenedorGaleria.innerHTML = '<p class="gallery-loading">Cargando imágenes del servidor...</p>';
+
+        try {
+            const resp = await fetch(URL_LISTAR_IMG);
+            const data = await resp.json();
+
+            if (data.ok && data.imagenes.length > 0) {
+                contenedorGaleria.innerHTML = "";
+                data.imagenes.forEach(img => {
+                    const card = document.createElement("div");
+                    card.className = "gallery-item";
+                    card.innerHTML = `
+                        <img src="${img.url}" alt="${img.nombre}" loading="lazy">
+                        <div class="gallery-item-info">
+                            <span class="gallery-item-name" title="${img.nombre}">${img.nombre}</span>
+                            <div class="gallery-item-actions">
+                                <button type="button" class="btn-insert-img" onclick="insertarImagenSeleccionada('${img.url}', '${img.nombre}')">
+                                    ➕ Insertar
+                                </button>
+                                <button type="button" class="btn-delete-img" title="Eliminar imagen del disco" onclick="eliminarImagenGaleria('${img.nombre}')">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    contenedorGaleria.appendChild(card);
+                });
+            } else {
+                contenedorGaleria.innerHTML = '<p class="gallery-loading">No hay imágenes subidas todavía en el servidor.</p>';
+            }
+        } catch (err) {
+            contenedorGaleria.innerHTML = '<p class="gallery-loading">Error al cargar la lista de imágenes.</p>';
+        }
+    }
+
+    function insertarImagenSeleccionada(url, nombre) {
+        insertarTextoEnCursor(`\n\n![${nombre}](${url})\n\n`);
+        cerrarModalImagenes();
+    }
+
+    function cerrarModalImagenes() {
+        modalImagenes.style.display = "none";
+        document.body.style.overflow = "";
+    }
+
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modalImagenes.style.display === "flex") {
+            cerrarModalImagenes();
+        }
+    });
+
+    modalImagenes.addEventListener("click", (e) => {
+        if (e.target === modalImagenes) {
+            cerrarModalImagenes();
+        }
+    });
+
+    // ==========================================
+    // GUARDADO ASÍNCRONO EN SQLITE
+    // ==========================================
+    async function guardarDocumento() {
+        let titulo = tituloInput.value.trim();
+        const contenido = input.value;
+
+        if (!titulo) {
+            const primerH1 = contenido.match(/^#+\s+(.+)$/m);
+            titulo = primerH1 ? primerH1[1].trim() : "Documento sin título";
+            tituloInput.value = titulo;
+        }
+
+        saveStatus.textContent = "⏳ Guardando...";
+        saveStatus.className = "save-status-badge status-saving";
+
+        try {
+            const resp = await fetch("{{ url_for('clips.api_guardar_documento') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: currentDocId,
+                    titulo: titulo,
+                    contenido: contenido
+                })
+            });
+
+            const data = await resp.json();
+            if (data.ok) {
+                currentDocId = data.id;
+                if (docIdInput) docIdInput.value = data.id;
+                
+                hayCambiosSinGuardar = false;
+                saveStatus.textContent = "🟢 Guardado";
+                saveStatus.className = "save-status-badge status-saved";
+
+                if (!window.location.pathname.includes(String(currentDocId))) {
+                    window.history.replaceState(null, "", `/documentos/estudio/${currentDocId}`);
+                }
+            } else {
+                throw new Error("Error en respuesta");
+            }
+        } catch (err) {
+            console.error(err);
+            saveStatus.textContent = "🔴 Error al guardar";
+            saveStatus.className = "save-status-badge status-error";
+        }
+    }
+
+    // Atajo global Ctrl + S
+    window.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+            e.preventDefault();
+            guardarDocumento();
+        }
+    });
+
+    // ==========================================
+    // SINCRONIZACIÓN POR CLIC BIDIRECCIONAL
+    // ==========================================
+    output.addEventListener("click", (e) => {
+        const elemento = e.target.closest("h1, h2, h3, h4, h5, p, li, tr, blockquote, pre");
+        if (!elemento) return;
+
+        let textoBuscado = elemento.innerText.trim();
+        if (!textoBuscado) return;
+
+        const palabras = textoBuscado.split(/\s+/).slice(0, 4).join(" ");
+        const raw = input.value;
+        let posicion = raw.indexOf(palabras);
+
+        if (posicion === -1) {
+            posicion = raw.indexOf(textoBuscado.substring(0, 15));
+        }
+
+        if (posicion !== -1) {
+            input.focus();
+            input.setSelectionRange(posicion, posicion);
+
+            const lineasHastaAhi = raw.substring(0, posicion).split("\n").length;
+            const lineasTotales = raw.split("\n").length;
+            const proporcion = lineasHastaAhi / lineasTotales;
+            input.scrollTop = (proporcion * input.scrollHeight) - (input.clientHeight / 3);
+        }
+    });
+
+    input.addEventListener("click", () => {
+        const cursorPos = input.selectionStart;
+        const textoPrevio = input.value.substring(0, cursorPos);
+        const lineas = input.value.split("\n");
+        const lineaActual = textoPrevio.split("\n").length - 1;
+
+        let muestra = lineas[lineaActual]?.trim();
+        if (!muestra) {
+            for (let i = lineaActual - 1; i >= 0; i--) {
+                if (lineas[i].trim()) {
+                    muestra = lineas[i].trim();
+                    break;
+                }
+            }
+        }
+
+        if (!muestra) return;
+
+        let textoLimpio = muestra.replace(/^[#\-*>\d\.\s]+/, "").replace(/[`*$_]/g, "").trim();
+        if (textoLimpio.length > 25) textoLimpio = textoLimpio.substring(0, 25);
+        if (textoLimpio.length < 3) return;
+
+        const elementos = output.querySelectorAll("h1, h2, h3, h4, h5, p, li, blockquote, pre, td, th");
+        for (let el of elementos) {
+            if (el.innerText && el.innerText.includes(textoLimpio)) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                el.classList.add("sync-flash");
+                setTimeout(() => el.classList.remove("sync-flash"), 1200);
+                break;
+            }
+        }
+    });
+
+    function insertarSaltoPagina() {
+        insertarTextoEnCursor("\n\n\\newpage\n\n");
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        localStorage.removeItem("pcm_doc_draft");
+        renderizarDocumento();
+    });
+
+    function exportarPDF() {
+        if (!input.value.trim()) {
+            alert("Escribe o pega contenido antes de exportar.");
+            return;
+        }
+        window.print();
+    }
+
+    function copiarMarkdown(btn) {
+        if (input.value.trim() && window.copiarTextoUniversal) {
+            window.copiarTextoUniversal(input.value, btn);
+        }
+    }
+
+    function limpiarEditor() {
+        if (confirm("¿Vaciar el documento actual?")) {
+            input.value = "";
+            tituloInput.value = "";
+            if (!currentDocId) {
+                localStorage.removeItem("pcm_doc_draft");
+            }
+            marcarModificado();
+            renderizarDocumento();
+            input.focus();
+        }
+    }
+
+
+    async function eliminarImagenGaleria(nombreArchivo) {
+        if (!confirm(`¿Eliminar definitivamente «${nombreArchivo}» del servidor?`)) {
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/documentos/api/eliminar_imagen/${encodeURIComponent(nombreArchivo)}`, {
+                method: "POST"
+            });
+            const data = await resp.json();
+
+            if (data.ok) {
+                abrirModalImagenes(); // Refrescar la galería automáticamente
+            } else {
+                alert(data.error || "No se pudo eliminar la imagen.");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Error de conexión al eliminar la imagen.");
+        }
+    }
+
+    function insertarEjemploMath() {
+        const ejemplo = `# Análisis Matemático y Tablas Técnicas
+
+Este documento contiene cálculos, tablas y fórmulas generadas por IA.
+
+---
+
+### 1. Ecuaciones y Cálculo Integral
+
+La integral gaussiana extendida sobre todo el plano real se define como:
+
+$$ \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} $$
+
+\\newpage
+
+### 2. Tabla Comparativa de Modelos
+
+| Parámetro | Modelo 7B | Modelo 70B |
+| :--- | :--- | :--- |
+| **VRAM Mínima** | 6 GB | 40 GB |
+| **Cuantización** | Q4_K_M | Q8_0 |
+| **Rendimiento** | 65 tok/s | 18 tok/s |
+
+---
+
+### 3. Diagrama o Gráfica
+
+![Logo](https://raw.githubusercontent.com/santiagodvergara05-debug/PCMPrivateClipManager/main/static/img/favicon.png)
+`;
+        input.value = ejemplo;
+        if (!tituloInput.value.trim()) {
+            tituloInput.value = "Análisis Matemático y Tablas Técnicas";
+        }
+        marcarModificado();
+        renderizarDocumento();
+    }
+</script>
+{% endblock %}

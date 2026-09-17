@@ -1,0 +1,191 @@
+/* =========================================
+   WORKSPACE DE CREACIÓN DE CÓDIGO (IDE)
+   ========================================= */
+.code-workspace {
+    max-width: 1450px;
+    width: 95%;
+    margin: 1.5rem auto 3rem auto;
+}
+
+.code-full-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    height: calc(100vh - 190px);
+    min-height: 520px;
+}
+
+/* Barra de herramientas superior */
+.code-toolbar {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 0.65rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.toolbar-left, .toolbar-right {
+    display: flex;
+    align-items: center;
+}
+
+.toolbar-center {
+    flex: 1;
+    display: flex;
+    gap: 0.75rem;
+    min-width: 300px;
+}
+
+.btn-back {
+    background-color: #21262d;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    padding: 0.55rem 0.95rem;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    text-decoration: none;
+    font-weight: 600;
+    transition: all 0.15s ease;
+}
+
+.btn-back:hover {
+    background-color: #30363d;
+    color: #ffffff;
+}
+
+.input-title {
+    flex: 1;
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    color: #ffffff;
+    padding: 0.55rem 0.9rem;
+    border-radius: 6px;
+    font-size: 0.92rem;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.input-title:focus {
+    border-color: #388bfd;
+}
+
+.select-lang {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    color: #e6edf3;
+    padding: 0.55rem 0.9rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+}
+
+.select-lang:focus {
+    border-color: #388bfd;
+}
+
+.btn-save-main {
+    background-color: #1f6feb;
+    border: 1px solid #388bfd;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 0.55rem 1.1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background-color 0.15s ease;
+}
+
+.btn-save-main:hover {
+    background-color: #388bfd;
+}
+
+.shortcut-badge {
+    background-color: rgba(0, 0, 0, 0.3);
+    font-size: 0.72rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+/* Contenedor tipo IDE */
+.ide-container {
+    flex: 1;
+    display: flex;
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* Columna de numeración de líneas */
+.line-gutter {
+    width: 54px;
+    background-color: #0d1117;
+    border-right: 1px solid #21262d;
+    color: #484f58;
+    text-align: right;
+    padding: 1rem 0.65rem 1rem 0;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    user-select: none;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.line-gutter div {
+    height: 1.6em;
+}
+
+/* Área de código editable */
+.code-textarea {
+    flex: 1;
+    background-color: transparent;
+    border: none;
+    color: #e6edf3;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    padding: 1rem;
+    outline: none;
+    resize: none;
+    box-sizing: border-box;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+    overflow-y: scroll;
+}
+
+/* Barra de estado */
+.code-statusbar {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 0.4rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    color: #8b949e;
+}
+
+.stats-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.save-status {
+    color: #3fb950;
+    font-weight: 600;
+}

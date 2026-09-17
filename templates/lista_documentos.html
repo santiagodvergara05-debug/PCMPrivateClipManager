@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+
+{% block title %}PCMPrivateClipManager - Biblioteca de Documentos{% endblock %}
+
+{% block extra_css %}
+<!-- KaTeX y estilos locales -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/katex.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/documentos.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="docs-hub-container">
+
+    <!-- Encabezado de la Biblioteca -->
+    <header class="hub-header">
+        <div class="hub-title-block">
+            <h2>📑 Biblioteca de Documentos & Math</h2>
+            <p class="hub-subtitle">Gestiona, edita y exporta tus informes Markdown, tablas y fórmulas técnicas</p>
+        </div>
+
+        <div class="hub-header-actions">
+            <a href="{{ url_for('clips.documentos_nuevo') }}" class="btn-hub-new">
+                ➕ Nuevo Documento
+            </a>
+        </div>
+    </header>
+
+    <!-- Barra de Control: Buscador Reactivo y Métricas -->
+    <div class="hub-control-bar">
+        <div class="search-input-wrapper">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="busquedaDocs" placeholder="Buscar documento por título..." autocomplete="off">
+            <button type="button" id="btnLimpiarBusqueda" class="btn-clear-search" onclick="limpiarFiltro()" style="display: none;">✕</button>
+        </div>
+
+        <div class="hub-stats-badge">
+            <span id="contadorVisibles">{{ documentos|length }}</span> de {{ documentos|length }} documentos
+        </div>
+    </div>
+
+    <!-- Mensajes Flash -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash-card flash-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Grilla de Tarjetas -->
+    {% if documentos %}
+    <div class="docs-grid" id="contenedorTarjetas">
+        {% for doc in documentos %}
+        <article class="doc-card" data-titulo="{{ doc.titulo|lower }}">
+            
+            <!-- Contenido crudo protegido en un textarea oculto -->
+            <textarea id="raw-doc-{{ doc.id }}" style="display: none;" readonly>{{ doc.contenido }}</textarea>
+
+            <header class="card-top">
+                <h3 class="card-title" title="{{ doc.titulo }}">{{ doc.titulo }}</h3>
+                <span class="card-date">{{ doc.actualizado_en[:16] if doc.actualizado_en else 'Reciente' }}</span>
+            </header>
+
+            <!-- Badges de características -->
+            <div class="card-badges">
+                {% if '$' in doc.contenido or '\\[' in doc.contenido %}
+                    <span class="tag-badge tag-katex">📐 KaTeX</span>
+                {% endif %}
+                {% if '|' in doc.contenido %}
+                    <span class="tag-badge tag-table">⊞ Tabla</span>
+                {% endif %}
+                {% if '\\newpage' in doc.contenido %}
+                    <span class="tag-badge tag-break">✂️ Saltos A4</span>
+                {% endif %}
+                <span class="tag-words">{{ (doc.contenido.split() | length) }} palabras</span>
+            </div>
+
+            <!-- Botonera de acciones -->
+<!-- Botonera de acciones sin Jinja dentro de JS -->
+            <footer class="card-footer">
+                <div class="card-actions-left">
+                    <button type="button" class="btn-card-action btn-preview" 
+                            data-id="{{ doc.id }}" 
+                            data-titulo="{{ doc.titulo }}" 
+                            onclick="abrirVistaPreviaBtn(this)">
+                        👁️ Ver
+                    </button>
+                    <a href="{{ url_for('clips.documentos_editar', doc_id=doc.id) }}" class="btn-card-action btn-edit">
+                        ✏️ Editar
+                    </a>
+                </div>
+
+                <div class="card-actions-right">
+                    <button type="button" class="btn-card-icon" title="Copiar Markdown al portapapeles" 
+                            data-id="{{ doc.id }}" 
+                            onclick="copiarDocBtn(this)">
+                        📋
+                    </button>
+                    
+                    <form method="POST" action="{{ url_for('clips.eliminar_documento', doc_id=doc.id) }}" 
+                          data-titulo="{{ doc.titulo }}"
+                          onsubmit="return confirmarEliminacion(this);">
+                        <button type="submit" class="btn-card-icon btn-delete" title="Eliminar documento">
+                            🗑️
+                        </button>
+                    </form>
+                </div>
+            </footer>
+        </article>
+        {% endfor %}
+    </div>
+
+    <!-- Estado vacío de búsqueda -->
+    <div id="noResultados" class="hub-empty-state" style="display: none;">
+        <p>🔍 No se encontraron documentos con ese título.</p>
+    </div>
+
+    {% else %}
+    <!-- Estado sin documentos -->
+    <div class="hub-empty-state">
+        <div class="empty-icon">📑</div>
+        <h3>No tienes documentos guardados</h3>
+        <p>Crea tu primer informe con fórmulas matemáticas KaTeX y exportación directa a PDF.</p>
+        <a href="{{ url_for('clips.documentos_nuevo') }}" class="btn-hub-new mt-3">
+            ➕ Crear Documento Ahora
+        </a>
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- MODAL DE VISTA PREVIA RENDERIZADA -->
+<div id="modalDocPreview" class="doc-modal-overlay" style="display: none;">
+    <div class="doc-modal-container">
+        <header class="doc-modal-header no-print">
+            <h3 id="modalDocTitle" class="doc-modal-title">Título</h3>
+            <div class="doc-modal-actions">
+                <button type="button" class="btn-modal-action" onclick="imprimirDesdeModal()">
+                    🖨️ Exportar a PDF
+                </button>
+                <button type="button" class="btn-modal-close" onclick="cerrarVistaPrevia()">✕</button>
+            </div>
+        </header>
+
+        <!-- Hoja de visualización idéntica al editor -->
+        <div class="doc-modal-body">
+            <div id="modalDocOutput" class="doc-rendered-sheet"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Motores offline -->
+<script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/purify.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/katex.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/marked-footnote.min.js') }}"></script>
+
+<script>
+    if (window.marked) {
+        marked.setOptions({ breaks: true, gfm: true });
+        if (typeof markedFootnote === "function") {
+            marked.use(markedFootnote());
+        }
+    }
+
+    // Buscador reactivo
+    const inputBusqueda = document.getElementById("busquedaDocs");
+    const contenedor = document.getElementById("contenedorTarjetas");
+    const mensajeVacio = document.getElementById("noResultados");
+    const contadorVisibles = document.getElementById("contadorVisibles");
+    const btnLimpiar = document.getElementById("btnLimpiarBusqueda");
+
+    if (inputBusqueda) {
+        inputBusqueda.addEventListener("input", () => {
+            const query = inputBusqueda.value.toLowerCase().trim();
+            const tarjetas = document.querySelectorAll(".doc-card");
+            let visibles = 0;
+
+            btnLimpiar.style.display = query ? "block" : "none";
+
+            tarjetas.forEach(card => {
+                const titulo = card.getAttribute("data-titulo") || "";
+                if (titulo.includes(query)) {
+                    card.style.display = "flex";
+                    visibles++;
+                } else {
+                    card.style.display = "none";
+                }
+            });
+
+            contadorVisibles.textContent = visibles;
+            mensajeVacio.style.display = (visibles === 0 && tarjetas.length > 0) ? "block" : "none";
+        });
+    }
+
+    function limpiarFiltro() {
+        inputBusqueda.value = "";
+        inputBusqueda.dispatchEvent(new Event("input"));
+        inputBusqueda.focus();
+    }
+
+    // Confirmación de borrado
+    function confirmarEliminacion(form) {
+        const tit = form.getAttribute("data-titulo") || "este documento";
+        return confirm(`¿Eliminar definitivamente «${tit}»?`);
+    }
+
+    // Copiar Markdown desde el textarea oculto
+    function copiarDocAlPortapapeles(docId, btn) {
+        const area = document.getElementById("raw-doc-" + docId);
+        if (!area) return;
+        const texto = area.value;
+
+        if (window.copiarTextoUniversal) {
+            window.copiarTextoUniversal(texto, btn);
+        } else {
+            navigator.clipboard.writeText(texto).then(() => {
+                const ico = btn.innerHTML;
+                btn.innerHTML = "✓";
+                setTimeout(() => btn.innerHTML = ico, 1200);
+            });
+        }
+    }
+
+    // ==========================================
+    // MOTOR DE VISTA PREVIA RENDERIZADA (MODAL)
+    // ==========================================
+    const modal = document.getElementById("modalDocPreview");
+    const modalTitle = document.getElementById("modalDocTitle");
+    const modalOutput = document.getElementById("modalDocOutput");
+
+    function renderizarEnModal(rawText) {
+        const mathTokens = [];
+        const codeTokens = [];
+        const escapedDollars = [];
+        let mathIndex = 0;
+        let codeIndex = 0;
+        let dollarIndex = 0;
+        let texto = rawText;
+
+        texto = texto.replace(/(```[\s\S]*?```)/g, (match) => {
+            const key = `@@CODEBLOCK_${codeIndex++}@@`;
+            codeTokens.push({ key, val: match });
+            return key;
+        });
+
+        texto = texto.replace(/(`[^`\n]+?`)/g, (match) => {
+            const key = `@@CODEINLINE_${codeIndex++}@@`;
+            codeTokens.push({ key, val: match });
+            return key;
+        });
+
+        texto = texto.replace(/\\\$/g, () => {
+            const key = `@@DOLLAR_LITERAL_${dollarIndex++}@@`;
+            escapedDollars.push({ key, val: "$" });
+            return key;
+        });
+
+        texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');
+
+        texto = texto.replace(/\$\$([\s\S]*?)\$\$/g, (match, expr) => {
+            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: true });
+            return `\n\n${key}\n\n`;
+        });
+
+        texto = texto.replace(/(?:^|\n)[ \t]*\\\[([\s\S]*?)\\\][ \t]*(?:\n|$)/g, (match, expr) => {
+            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: true });
+            return `\n\n${key}\n\n`;
+        });
+
+        texto = texto.replace(/\\\(([\s\S]*?)\\\)/g, (match, expr) => {
+            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: false });
+            return key;
+        });
+
+        texto = texto.replace(/(?<![\$\w\\])\$([^\s\$\n](?:[^\$\n]*?[^\s\$\n])?)\$(?![\$\w])/g, (match, expr) => {
+            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: false });
+            return key;
+        });
+
+        codeTokens.forEach(item => { texto = texto.replace(item.key, item.val); });
+        escapedDollars.forEach(item => { texto = texto.replace(item.key, item.val); });
+
+        let parsedHtml = marked.parse(texto);
+        let safeHtml = DOMPurify.sanitize(parsedHtml);
+
+        mathTokens.forEach(tok => {
+            let rendered = "";
+            try {
+                rendered = katex.renderToString(tok.expr.trim(), {
+                    displayMode: tok.display,
+                    throwOnError: false
+                });
+            } catch (err) {
+                rendered = `<span class="katex-error">${tok.expr}</span>`;
+            }
+
+            if (tok.display) {
+                const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+                if (pWrapper.test(safeHtml)) {
+                    safeHtml = safeHtml.replace(pWrapper, `<div class="katex-display-wrapper">${rendered}</div>`);
+                } else {
+                    safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), `<div class="katex-display-wrapper">${rendered}</div>`);
+                }
+            } else {
+                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), rendered);
+            }
+        });
+
+        modalOutput.innerHTML = safeHtml;
+    }
+
+    // Disparadores que leen dataset sin tocar Jinja
+    function abrirVistaPreviaBtn(btn) {
+        const id = btn.getAttribute("data-id");
+        const titulo = btn.getAttribute("data-titulo") || "Documento";
+        abrirVistaPrevia(id, titulo);
+    }
+
+    function copiarDocBtn(btn) {
+        const id = btn.getAttribute("data-id");
+        copiarDocAlPortapapeles(id, btn);
+    }
+
+    function abrirVistaPrevia(docId, titulo) {
+        const area = document.getElementById("raw-doc-" + docId);
+        if (!area) return;
+        modalTitle.textContent = titulo;
+        renderizarEnModal(area.value);
+        modal.style.display = "flex";
+        document.body.style.overflow = "hidden"; // Evitar scroll del fondo
+    }
+
+    function cerrarVistaPrevia() {
+        modal.style.display = "none";
+        modalOutput.innerHTML = "";
+        document.body.style.overflow = "";
+    }
+
+    function imprimirDesdeModal() {
+        window.print();
+    }
+
+    // Cerrar al presionar Escape o hacer clic fuera de la ventana
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && modal.style.display === "flex") {
+            cerrarVistaPrevia();
+        }
+    });
+
+    modal.addEventListener("click", (e) => {
+        if (e.target === modal) {
+            cerrarVistaPrevia();
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,362 @@
+/* =========================================
+   MÓDULO: BORRADORES & RESÚMENES (BIBLIOTECA)
+   ========================================= */
+
+.novelas-container {
+    max-width: 1450px;
+    width: 95%;
+    margin: 2rem auto 4rem auto;
+}
+
+/* Cabecera superior */
+.novelas-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.novelas-header-row h2 {
+    color: #ffffff;
+    font-size: 1.6rem;
+    margin: 0 0 0.35rem 0;
+}
+
+.section-desc {
+    color: #8b949e;
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+/* Botón Nuevo Borrador */
+.btn-new-novel {
+    background-color: #f0883e;
+    color: #0d1117;
+    font-weight: 700;
+    padding: 0.65rem 1.3rem;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.92rem;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    box-shadow: 0 4px 12px rgba(240, 136, 62, 0.25);
+    white-space: nowrap;
+}
+
+.btn-new-novel:hover {
+    background-color: #d97706;
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+/* Grilla responsive con contención de desbordamiento */
+.novelas-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+/* Tarjeta individual */
+.novel-card {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0; /* Impide que palabras largas estiren la grilla */
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.novel-card:hover {
+    border-color: #58a6ff;
+    transform: translateY(-2px);
+}
+
+/* Cabecera de tarjeta */
+.novel-card-header {
+    padding: 1rem 1.25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #21262d;
+    background-color: #0d1117;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.novel-title {
+    margin: 0;
+    color: #ffffff;
+    font-size: 1.05rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* Corta títulos infinitos con '...' */
+    min-width: 0;
+    flex: 1;
+}
+
+.badge-draft {
+    background-color: #21262d;
+    color: #8b949e;
+    border: 1px solid #30363d;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Cuerpo de lectura */
+.novel-body {
+    padding: 1.25rem;
+    flex: 1;
+    cursor: pointer;
+    min-width: 0;
+}
+
+.novel-body p {
+    color: #c9d1d9;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    margin: 0;
+    word-break: break-word; /* Rompe palabras sin espacios si es necesario */
+    overflow-wrap: anywhere;
+}
+
+/* Pie de tarjeta y métricas */
+.novel-card-footer {
+    padding: 0.85rem 1.25rem;
+    border-top: 1px solid #21262d;
+    background-color: #0d1117;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.novel-stats {
+    color: #8b949e;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.novel-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Botones de acción */
+.btn-action {
+    background-color: #21262d;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    padding: 0.35rem 0.75rem;
+    border-radius: 5px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-action:hover {
+    background-color: #30363d;
+    color: #ffffff;
+}
+
+.btn-action.copy.copied {
+    background-color: #238636 !important;
+    border-color: #2ea043 !important;
+    color: #ffffff !important;
+}
+
+.btn-action.edit:hover {
+    background-color: #1f6feb;
+    border-color: #388bfd;
+    color: #ffffff;
+}
+
+.btn-action.delete:hover {
+    background-color: #da3633;
+    border-color: #f85149;
+    color: #ffffff;
+}
+
+/* =========================================
+   BARRA DE BÚSQUEDA TÉCNICA
+   ========================================= */
+.search-bar-wrapper {
+    margin-bottom: 1.75rem;
+    width: 100%;
+}
+
+.search-input-box {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 0.25rem 1rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.search-input-box:focus-within {
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.15);
+}
+
+.search-icon {
+    font-size: 1rem;
+    margin-right: 0.75rem;
+    color: #8b949e;
+    user-select: none;
+}
+
+.search-input-box input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #e6edf3;
+    font-size: 0.95rem;
+    padding: 0.65rem 0;
+    width: 100%;
+}
+
+.search-input-box input::placeholder {
+    color: #484f58;
+}
+
+.search-counter {
+    font-size: 0.82rem;
+    color: #8b949e;
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    padding: 0.25rem 0.7rem;
+    border-radius: 12px;
+    white-space: nowrap;
+    user-select: none;
+    margin-left: 0.75rem;
+}
+
+/* Estado sin resultados */
+.no-results {
+    text-align: center;
+    padding: 3rem 1.5rem;
+    color: #8b949e;
+    background-color: #161b22;
+    border: 1px dashed #30363d;
+    border-radius: 8px;
+    margin-top: 1.5rem;
+}
+
+
+/* Píldoras de filtrado */
+.novel-filter-bar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+}
+
+.novel-pill {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    padding: 0.35rem 0.85rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.novel-pill:hover {
+    border-color: #58a6ff;
+    color: #e6edf3;
+}
+
+.novel-pill.active {
+    background-color: #1f6feb;
+    border-color: #388bfd;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* Insignias por tipo */
+.badge-draft.badge-borrador {
+    background-color: #21262d;
+    color: #8b949e;
+    border-color: #30363d;
+}
+
+.badge-draft.badge-resumen {
+    background-color: rgba(56, 139, 253, 0.15);
+    color: #58a6ff;
+    border-color: rgba(56, 139, 253, 0.4);
+}
+
+/* =========================================
+   FILA UNIFICADA: BUSCADOR + REDACTAR NUEVO
+   ========================================= */
+.search-action-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    width: 100%;
+}
+
+.search-action-row .search-input-box {
+    flex: 1;
+    min-width: 0;
+}
+
+.btn-new-novel {
+    background-color: #f0883e;
+    color: #0d1117;
+    font-weight: 700;
+    padding: 0.65rem 1.3rem;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.92rem;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    box-shadow: 0 4px 12px rgba(240, 136, 62, 0.25);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn-new-novel:hover {
+    background-color: #d97706;
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+@media (max-width: 600px) {
+    .search-action-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .btn-new-novel {
+        justify-content: center;
+    }
+}

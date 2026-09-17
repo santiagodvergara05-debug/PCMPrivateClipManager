@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}ClipTemp - Acceso{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <h2>ClipTemp Web</h2>
+        <p>Introduce la clave de acceso</p>
+
+        {% if error %}
+            <div class="alert-error">{{ error }}</div>
+        {% endif %}
+
+        <form action="{{ url_for('clips.login') }}" method="POST">
+            <input type="password" name="password" placeholder="Contraseña de acceso" required autofocus>
+            <button type="submit" class="btn-primary">Entrar</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

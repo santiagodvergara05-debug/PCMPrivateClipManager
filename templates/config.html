@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+
+{% block title %}PCMPrivateClipManager - Configuración{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/config.css') }}">
+{% endblock %}
+
+{% block content %}
+<main class="config-container">
+    <!-- Encabezado -->
+    <div class="config-header">
+        <div>
+            <h2>⚙️ Configuración del Sistema</h2>
+            <p class="subtitle">Ajustes directos del archivo .env, copias de seguridad y mantenimiento</p>
+        </div>
+        {% if desbloqueo_critico_activo %}
+            <button type="submit" form="form-ajustes" class="btn-config primary">💾 Guardar Cambios</button>
+        {% endif %}
+    </div>
+
+    <!-- Mensajes Flash y Alertas -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert-success" style="margin-bottom: 1rem;">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    {% if request.args.get('guardado') %}
+        <div class="alert-success">
+            ✅ Cambios guardados correctamente. Si modificaste puerto o red, reinicia el servidor.
+        </div>
+    {% endif %}
+
+    {% if request.args.get('error_master') %}
+        <div class="alert-error">
+            ❌ Llave maestra incorrecta. Verifica el valor de MASTER_KEY en tu archivo .env.
+        </div>
+    {% endif %}
+
+    <!-- 4 Métricas del sistema en grilla homogénea -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <span class="stat-num">{{ total_clips }}</span>
+            <span class="stat-label">⚡ Clips Rápidos</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-num">{{ total_resumenes }}</span>
+            <span class="stat-label">📖 Borradores & Resúmenes</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-num">{{ total_codigo }}</span>
+            <span class="stat-label">💻 Snippets de Código</span>
+        </div>
+        <div class="stat-card">
+            <span class="stat-num">{{ total_documentos | default(0) }}</span>
+            <span class="stat-label">📑 Documentos & Math</span>
+        </div>
+    </div>
+
+    <!-- Diagnóstico de Espacio en Disco & Mantenimiento -->
+    <section class="config-card">
+        <div class="config-card-header">
+            <h3>💾 Almacenamiento & Diagnóstico</h3>
+            <span class="badge-exclusive">Estado Físico en Disco</span>
+        </div>
+        <p class="card-desc">Monitorea el peso de tus datos antes de descargar un respaldo comprimido.</p>
+
+        <div class="storage-stats-container">
+            <div class="storage-stat-pill">
+                <span class="storage-icon">🗄️</span>
+                <div>
+                    <strong>Base de Datos (pcm.db)</strong>
+                    <p>{{ peso_db }} en disco</p>
+                </div>
+            </div>
+
+            <div class="storage-stat-pill">
+                <span class="storage-icon">🖼️</span>
+                <div>
+                    <strong>Galería de Imágenes</strong>
+                    <p>{{ cant_imagenes }} archivos · {{ peso_imagenes }}</p>
+                </div>
+            </div>
+
+            <form method="POST" action="{{ url_for('clips.purgar_imagenes_huerfanas') }}" 
+                  onsubmit="return confirm('¿Escanear y eliminar imágenes del disco que no estén vinculadas a ningún documento?');">
+                <button type="submit" class="btn-config secondary btn-purge" title="Eliminar fotos que ya no se usan">
+                    🧹 Purgar Huérfanas
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <!-- Formulario de Configuración Crítica -->
+    <form method="POST" action="{{ url_for('clips.configuracion') }}" id="form-ajustes">
+        <section class="config-card {% if not desbloqueo_critico_activo %}card-locked{% endif %}">
+            <h3>🔒 Configuración Crítica del Servidor</h3>
+
+            {% if desbloqueo_critico_activo %}
+                <div class="unlock-banner active">
+                    🔓 Sesión crítica activa. Expira en: 
+                    <b id="texto-contador" data-segundos="{{ desbloqueo_segundos_restantes | default(0) }}">
+                        {{ (desbloqueo_segundos_restantes // 60) }} min {{ (desbloqueo_segundos_restantes % 60) }} seg
+                    </b>
+                </div>
+
+                <div class="field-item">
+                    <label>Contraseña web de acceso (APP_PASSWORD):</label>
+                    <input type="text" name="app_password" value="{{ valores.get('APP_PASSWORD', '') }}" placeholder="Dejar vacío para mantener la actual">
+                </div>
+
+                <div class="field-item">
+                    <label>Puerto local del servidor (PORT):</label>
+                    <input type="number" name="port" value="{{ valores.get('PORT', '5545') }}" class="input-corto">
+                </div>
+
+                <div class="field-item">
+                    <label>Interfaz de escucha en red (HOST):</label>
+                    <select name="host">
+                        <option value="127.0.0.1" {% if valores.get('HOST', '0.0.0.0') == '127.0.0.1' %}selected{% endif %}>
+                            127.0.0.1 — Solo PC local
+                        </option>
+                        <option value="0.0.0.0" {% if valores.get('HOST', '0.0.0.0') == '0.0.0.0' %}selected{% endif %}>
+                            0.0.0.0 — Red local LAN (Notebooks y celulares)
+                        </option>
+                    </select>
+                </div>
+
+                <div class="checkbox-item">
+                    <label>
+                        <input type="checkbox" name="log_mode" {% if valores.get('LOG_MODE', 'false')|lower == 'true' %}checked{% endif %}>
+                        Habilitar registro detallado en terminal (LOG_MODE)
+                    </label>
+                </div>
+            {% else %}
+                <p class="card-desc">Parámetros avanzados de red, contraseñas y puertos protegidos contra modificaciones accidentales.</p>
+                <div class="alert-warning">
+                    🔒 Sección bloqueada. Desbloquea con tu Llave Maestra abajo para editar estos valores.
+                </div>
+            {% endif %}
+        </section>
+    </form>
+
+    <!-- Tarjeta: Gestión de Desbloqueo Crítico (Master Key) -->
+    <section class="config-card">
+        <h3>🔑 Llave Maestra (Master Key)</h3>
+        {% if desbloqueo_critico_activo %}
+            <p class="card-desc">El acceso a los parámetros críticos está habilitado actualmente.</p>
+            <form method="POST" action="{{ url_for('clips.bloquear_critico') }}">
+                <button type="submit" class="btn-config secondary">🔒 Bloquear configuración ahora</button>
+            </form>
+        {% else %}
+            <p class="card-desc">Ingresa la MASTER_KEY configurada en tu archivo <code>.env</code> para habilitar cambios críticos por 2 minutos.</p>
+            <form method="POST" action="{{ url_for('clips.desbloquear_critico') }}" class="masterkey-form">
+                <input type="password" name="master_key" placeholder="Pega la Master Key aquí..." required>
+                <button type="submit" class="btn-config primary">🔓 Desbloquear</button>
+            </form>
+        {% endif %}
+    </section>
+
+    <!-- Tarjeta: Copias de Seguridad -->
+    <section class="config-card">
+        <div class="config-card-header">
+            <h3>📦 Copias de Seguridad & Portabilidad</h3>
+            <span class="badge-exclusive">Exclusivo PCMPrivateClipManager</span>
+        </div>
+        <p class="card-desc">
+            Exporta o restaura todo tu contenido (clips, novelas, snippets y documentos). El motor detecta automáticamente respaldos ligeros (.JSON) o completos (.ZIP).
+        </p>
+
+        <div class="backup-dual-grid">
+            <!-- Bloque Exportación -->
+            <div class="backup-subcard">
+                <h4 class="subcard-title">⬇️ Exportar Datos</h4>
+                <p class="subcard-desc">Elige la modalidad de empaquetado:</p>
+                
+                <div class="export-buttons-stack">
+                    <a href="{{ url_for('clips.exportar_backup') }}" class="btn-export-tile">
+                        <span class="tile-icon">📄</span>
+                        <div class="tile-text">
+                            <strong>Respaldo Ligero (.JSON)</strong>
+                            <small>Solo texto de clips, prompts y documentos</small>
+                        </div>
+                    </a>
+
+                    <a href="{{ url_for('clips.exportar_backup', imagenes=1) }}" class="btn-export-tile tile-zip">
+                        <span class="tile-icon">📦</span>
+                        <div class="tile-text">
+                            <strong>Respaldo Completo (.ZIP)</strong>
+                            <small>Incluye JSON + todas las imágenes físicas adjuntas</small>
+                        </div>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Bloque Restauración -->
+            <div class="backup-subcard">
+                <h4 class="subcard-title">⬆️ Restaurar Datos</h4>
+                <p class="subcard-desc">Carga tu archivo <code>.json</code> o <code>.zip</code>:</p>
+
+                <form method="POST" action="{{ url_for('clips.importar_backup') }}" enctype="multipart/form-data" id="form-restaurar">
+                    <input type="file" id="inputArchivoBackup" name="archivo_backup" accept=".json, .zip" required style="display: none;">
+                    
+                    <div class="dropzone-box" id="dropzoneBackup" onclick="document.getElementById('inputArchivoBackup').click()">
+                        <span class="dropzone-icon" id="dropzoneIcon">📂</span>
+                        <p class="dropzone-prompt" id="dropzoneText">
+                            Haz clic o arrastra aquí tu archivo <strong>.JSON</strong> o <strong>.ZIP</strong>
+                        </p>
+                    </div>
+
+                    <button type="submit" id="btnEjecutarRestaurar" class="btn-config primary btn-restore-action" disabled>
+                        ⬆️ Iniciar Restauración
+                    </button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tarjeta: Seguridad de Sesión -->
+    <section class="config-card">
+        <h3>🛡️ Seguridad de Sesiones</h3>
+        <p class="card-desc">Regenera la llave interna de Flask cerrando de inmediato la sesión en todos los navegadores y dispositivos conectados.</p>
+        <form method="POST" action="{{ url_for('clips.cerrar_sesiones_globales') }}" onsubmit="return confirm('Esto cerrará la sesión en todos los dispositivos conectados. ¿Continuar?');">
+            <button type="submit" class="btn-config warning">🚪 Cerrar sesión en todos lados</button>
+        </form>
+    </section>
+
+    <!-- Tarjeta: Zona de Peligro -->
+    <section class="config-card danger-card">
+        <h3 style="color: #ff5252;">⚠️ Zona de Peligro</h3>
+        {% if desbloqueo_critico_activo %}
+            <p class="card-desc">Esta acción vaciará por completo la base de datos (clips, novelas y documentos). No se puede deshacer.</p>
+            <form method="POST" action="{{ url_for('clips.borrar_todo') }}" onsubmit="return confirm('¿CONFIRMAR VACIADO TOTAL? Se eliminarán absolutamente todos los registros.');">
+                <button type="submit" class="btn-config danger">🗑️ Borrar toda la base de datos</button>
+            </form>
+        {% else %}
+            <p class="card-desc" style="opacity: 0.7;">Desbloquea la configuración crítica con tu llave maestra para acceder al borrado total.</p>
+        {% endif %}
+    </section>
+</main>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 1. Contador regresivo en tiempo real
+    const elementoTexto = document.getElementById("texto-contador");
+    if (elementoTexto) {
+        let segundosRestantes = parseInt(elementoTexto.dataset.segundos || "0", 10);
+
+        const cuentaAtras = setInterval(() => {
+            segundosRestantes--;
+
+            if (segundosRestantes <= 0) {
+                clearInterval(cuentaAtras);
+                window.location.reload();
+            } else {
+                const min = Math.floor(segundosRestantes / 60);
+                const seg = segundosRestantes % 60;
+                elementoTexto.textContent = `${min} min ${seg < 10 ? '0' : ''}${seg} seg`;
+            }
+        }, 1000);
+    }
+
+    // 2. Control interactivo de Dropzone para archivos .json y .zip
+    const inputBackup = document.getElementById('inputArchivoBackup');
+    const dropzone = document.getElementById('dropzoneBackup');
+    const dropzoneIcon = document.getElementById('dropzoneIcon');
+    const dropzoneText = document.getElementById('dropzoneText');
+    const btnRestaurar = document.getElementById('btnEjecutarRestaurar');
+
+    function actualizarDropzoneConArchivo(file) {
+        if (!file) return;
+        
+        const esZip = file.name.toLowerCase().endsWith(".zip");
+        dropzoneIcon.textContent = esZip ? "📦" : "📄";
+        dropzoneText.innerHTML = `Listo para restaurar: <strong>${file.name}</strong> <br><small>(${(file.size / 1024).toFixed(1)} KB)</small>`;
+        dropzone.classList.add("has-file");
+        btnRestaurar.disabled = false;
+    }
+
+    inputBackup.addEventListener('change', function() {
+        if (this.files && this.files.length > 0) {
+            actualizarDropzoneConArchivo(this.files[0]);
+        }
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('drag-active');
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('drag-active');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('drag-active');
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            inputBackup.files = e.dataTransfer.files;
+            actualizarDropzoneConArchivo(e.dataTransfer.files[0]);
+        }
+    });
+</script>
+{% endblock %}

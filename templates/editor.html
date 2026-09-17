@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}{% if clip %}Editar: {{ clip.titulo }}{% else %}Nuevo Borrador{% endif %} - ClipTemp{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/editor.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="editor-workspace">
+    <form id="editorForm" action="{{ url_for('clips.guardar_resumen') }}" method="POST" class="editor-form">
+        {% if clip %}
+            <input type="hidden" name="clip_id" value="{{ clip.id }}">
+        {% endif %}
+
+        <!-- Barra superior: Controles, alternador Markdown y Título -->
+        <div class="editor-toolbar">
+            <div class="editor-top-bar">
+                <a href="{{ url_for('clips.biblioteca_novelas') }}" class="btn-tool btn-back">
+                    ← Volver a Biblioteca
+                </a>
+
+                <div class="editor-actions">
+                    <button type="button" id="btnTogglePreview" class="btn-tool btn-preview-toggle" onclick="alternarVistaMarkdown()">
+                        👁️ Vista Previa
+                    </button>
+                    <button type="button" class="btn-tool" onclick="copiarTitulo(this)" title="Copiar solo el título">
+                        🏷️ Copiar Título
+                    </button>
+                    <button type="button" class="btn-tool" onclick="copiarTodo(this)" title="Copiar todo el contenido">
+                        📋 Copiar Contenido
+                    </button>
+                    <button type="button" class="btn-tool" onclick="descargarTxt()" title="Descargar archivo .txt">
+                        💾 Descargar
+                    </button>
+                    <button type="submit" id="btnGuardar" class="btn-save-main">
+                        💾 Guardar <span class="shortcut-badge">Ctrl+S</span>
+                    </button>
+                </div>
+            </div>
+
+<!-- Selector de Tipo + Título con ancho flexible -->
+            <div class="editor-title-wrap">
+                <select name="tipo_doc" class="editor-type-select">
+                    <option value="Borrador" {% if not clip or clip.categoria != 'Resumen' %}selected{% endif %}>📝 Borrador</option>
+                    <option value="Resumen" {% if clip and clip.categoria == 'Resumen' %}selected{% endif %}>📑 Resumen</option>
+                </select>
+
+                <input type="text" id="editorTitulo" name="titulo" class="editor-title-input" 
+                       placeholder="Escribe el título..." 
+                       value="{{ clip.titulo if clip else '' }}" required autocomplete="off">
+            </div>
+        </div>
+
+        <!-- Área de redacción y lectura dual -->
+        <div class="editor-body-wrap">
+            <!-- Modo Editor -->
+            <textarea id="editorContenido" name="contenido" class="editor-textarea" 
+                      placeholder="Escribe o pega aquí tu texto en Markdown (**negrita**, # títulos, - listas)..." 
+                      required autofocus>{{ clip.contenido if clip else '' }}</textarea>
+
+            <!-- Modo Vista Previa Markdown (Oculto por defecto) -->
+            <div id="markdownPreview" class="markdown-rendered-view" style="display: none;"></div>
+        </div>
+
+        <!-- Barra inferior con métricas -->
+        <div class="editor-statusbar">
+            <div class="stats-group">
+                <span id="statPalabras">0 palabras</span>
+                <span class="stat-sep">·</span>
+                <span id="statCaracteres">0 caracteres</span>
+                <span class="stat-sep">·</span>
+                <span id="statLineas">0 líneas</span>
+                <span class="stat-sep">·</span>
+                <span id="statTiempo">~0 min lectura</span>
+            </div>
+            <div class="save-status" id="saveStatus">Listo</div>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    const textarea = document.getElementById("editorContenido");
+    const previewArea = document.getElementById("markdownPreview");
+    const btnToggle = document.getElementById("btnTogglePreview");
+    const statPalabras = document.getElementById("statPalabras");
+    const statCaracteres = document.getElementById("statCaracteres");
+    const statLineas = document.getElementById("statLineas");
+    const statTiempo = document.getElementById("statTiempo");
+    const form = document.getElementById("editorForm");
+
+    let enModoPreview = false;
+
+    if (window.marked) {
+        marked.setOptions({ breaks: true, gfm: true });
+    }
+
+    function alternarVistaMarkdown() {
+        enModoPreview = !enModoPreview;
+        if (enModoPreview) {
+            previewArea.innerHTML = marked.parse(textarea.value);
+            textarea.style.display = "none";
+            previewArea.style.display = "block";
+            btnToggle.innerHTML = "✏️ Volver al Editor";
+            btnToggle.classList.add("active-preview");
+        } else {
+            previewArea.style.display = "none";
+            textarea.style.display = "block";
+            textarea.focus();
+            btnToggle.innerHTML = "👁️ Vista Previa";
+            btnToggle.classList.remove("active-preview");
+        }
+    }
+
+    // Cálculo métrico asegurado
+    function actualizarMetricas() {
+        const texto = textarea.value;
+        const caracteres = texto.length;
+        const palabras = texto.trim() === "" ? 0 : texto.trim().split(/\s+/).length;
+        const lineas = texto === "" ? 0 : texto.split("\n").length;
+        
+        // 200 palabras por minuto
+        const minutosLectura = palabras === 0 ? 0 : Math.max(1, Math.ceil(palabras / 200));
+
+        statPalabras.textContent = `${palabras.toLocaleString()} palabras`;
+        statCaracteres.textContent = `${caracteres.toLocaleString()} car.`;
+        statLineas.textContent = `${lineas} líneas`;
+        statTiempo.textContent = `~${minutosLectura} min lectura`;
+    }
+
+    textarea.addEventListener("input", actualizarMetricas);
+    actualizarMetricas();
+
+    // Guardado rápido
+    window.addEventListener("keydown", function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+            e.preventDefault();
+            document.getElementById("saveStatus").textContent = "Guardando...";
+            form.submit();
+        }
+    });
+
+    // Copiado compatible con LAN
+    function copiarTitulo(btn) {
+        const inputTitulo = document.getElementById("editorTitulo");
+        if (inputTitulo && inputTitulo.value.trim()) {
+            window.copiarTextoUniversal(inputTitulo.value, btn);
+        }
+    }
+
+    function copiarTodo(btn) {
+        if (textarea.value.trim()) {
+            window.copiarTextoUniversal(textarea.value, btn);
+        }
+    }
+
+    // Descarga en formato TXT
+    function descargarTxt() {
+        const inputTitulo = document.getElementById("editorTitulo");
+        const nombreBase = (inputTitulo ? inputTitulo.value.trim() : "") || "borrador";
+        const nombreArchivo = `${nombreBase.replace(/[/\\?%*:|"<>]/g, '_')}.txt`;
+        
+        
+        const blob = new Blob([textarea.value], { type: "text/plain;charset=utf-8" });
+        const enlace = document.createElement("a");
+        enlace.href = URL.createObjectURL(blob);
+        enlace.download = nombreArchivo;
+        document.body.appendChild(enlace);
+        enlace.click();
+        document.body.removeChild(enlace);
+        URL.revokeObjectURL(enlace.href);
+    }
+</script>
+{% endblock %}

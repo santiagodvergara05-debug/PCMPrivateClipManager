@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}PCMPrivateClipManager - Nuevo Snippet de Código{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/agregar_codigo.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="code-workspace">
+    <form id="codeCreateForm" action="{{ url_for('clips.guardar_codigo') }}" method="POST" class="code-full-form">
+        
+        <!-- Barra de herramientas superior -->
+        <div class="code-toolbar">
+            <div class="toolbar-left">
+                <a href="{{ url_for('clips.seccion_codigo') }}" class="btn-back">
+                    ← Volver a Código
+                </a>
+            </div>
+
+            <div class="toolbar-center">
+                <input type="text" id="snippetTitulo" name="titulo" class="input-title" 
+                       placeholder="Título o descripción del script (ej: Script de backup automático)..." 
+                       required autocomplete="off" autofocus>
+                
+<select id="editCodeLenguaje" name="lenguaje" class="input-code lang-select">
+    <option value="Python">🐍 Python</option>
+    <option value="JavaScript">⚡ JavaScript</option>
+    <option value="TypeScript">🔷 TypeScript</option>
+    <option value="HTML">🌐 HTML</option>
+    <option value="CSS">🎨 CSS</option>
+    <option value="SQL">🗄️ SQL</option>
+    <option value="Bash">💻 Bash / Shell</option>
+    <option value="C++">⚙️ C++</option>
+    <option value="CSharp">🎯 C#</option>
+    <option value="Rust">🦀 Rust</option>
+    <option value="Go">🐹 Go</option>
+    <option value="PHP">🐘 PHP</option>
+    <option value="Java">☕ Java</option>
+    <option value="JSON">📦 JSON</option>
+    <option value="YAML">📑 YAML</option>
+    <option value="Markdown">📝 Markdown</option>
+    <option value="Texto">📄 Texto plano</option>
+</select>
+            </div>
+
+            <div class="toolbar-right">
+                <button type="submit" class="btn-save-main">
+                    💾 Guardar Snippet <span class="shortcut-badge">Ctrl+S</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Área de edición tipo IDE con Gutter sincronizado -->
+        <div class="ide-container">
+            <div id="codeGutter" class="line-gutter">
+                <div>1</div>
+            </div>
+            <textarea id="codeTextarea" name="contenido" class="code-textarea" 
+                      placeholder="// Escribe o pega tu código aquí..." 
+                      required spellcheck="false"></textarea>
+        </div>
+
+        <!-- Barra de estado inferior -->
+        <div class="code-statusbar">
+            <div class="stats-group">
+                <span id="statLineas">1 línea</span>
+                <span class="stat-sep">·</span>
+                <span id="statCaracteres">0 caracteres</span>
+            </div>
+            <div class="save-status" id="saveStatus">Listo</div>
+        </div>
+
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const textarea = document.getElementById("codeTextarea");
+    const gutter = document.getElementById("codeGutter");
+    const statLineas = document.getElementById("statLineas");
+    const statCaracteres = document.getElementById("statCaracteres");
+    const form = document.getElementById("codeCreateForm");
+
+    // Sincronizar scroll entre gutter y editor
+    textarea.addEventListener("scroll", () => {
+        gutter.scrollTop = textarea.scrollTop;
+    });
+
+    // Actualizar numeración y métricas
+    function actualizarLineas() {
+        const texto = textarea.value;
+        const lineas = texto === "" ? 1 : texto.split("\n").length;
+        const caracteres = texto.length;
+
+        let html = '';
+        for (let i = 1; i <= lineas; i++) {
+            html += `<div>${i}</div>`;
+        }
+        gutter.innerHTML = html;
+
+        statLineas.textContent = `${lineas} línea${lineas === 1 ? '' : 's'}`;
+        statCaracteres.textContent = `${caracteres.toLocaleString()} caracteres`;
+    }
+
+    textarea.addEventListener("input", actualizarLineas);
+
+    // Indentación con tecla Tab (4 espacios)
+    textarea.addEventListener("keydown", function(e) {
+        if (e.key === "Tab") {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+            this.selectionStart = this.selectionEnd = start + 4;
+            actualizarLineas();
+        }
+    });
+
+    // Guardado rápido con Ctrl+S
+    window.addEventListener("keydown", function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+            e.preventDefault();
+            document.getElementById("saveStatus").textContent = "Guardando...";
+            form.submit();
+        }
+    });
+</script>
+{% endblock %}

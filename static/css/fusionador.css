@@ -1,0 +1,382 @@
+/* =========================================
+   WORKSPACE: FUSIONADOR DE PROMPTS & TEXTO
+   ========================================= */
+.fusion-container {
+    max-width: 1450px;
+    width: 95%;
+    margin: 2rem auto 4rem auto;
+}
+
+.fusion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.fusion-header h2 {
+    color: #ffffff;
+    font-size: 1.6rem;
+    margin: 0 0 0.35rem 0;
+}
+
+.section-desc {
+    color: #8b949e;
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+/* Barra de controles */
+.fusion-controls-bar {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    padding: 0.55rem 1.2rem;
+    border-radius: 8px;
+    flex-wrap: wrap;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.separator-label {
+    color: #8b949e;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.select-separator {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    color: #e6edf3;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+}
+
+.select-separator:focus {
+    border-color: #58a6ff;
+}
+
+/* Switch interactivo */
+.switch-control {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.switch-control input {
+    display: none;
+}
+
+.switch-slider {
+    position: relative;
+    width: 38px;
+    height: 20px;
+    background-color: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 20px;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.switch-slider::before {
+    content: "";
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    left: 2px;
+    top: 2px;
+    background-color: #8b949e;
+    border-radius: 50%;
+    transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.switch-control input:checked + .switch-slider {
+    background-color: rgba(56, 139, 253, 0.25);
+    border-color: #58a6ff;
+}
+
+.switch-control input:checked + .switch-slider::before {
+    transform: translateX(18px);
+    background-color: #58a6ff;
+}
+
+.switch-label {
+    color: #e6edf3;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+/* Área de trabajo en 2 columnas */
+.fusion-workspace {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.fusion-card {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.card-topbar {
+    padding: 0.75rem 1.2rem;
+    background-color: #0d1117;
+    border-bottom: 1px solid #21262d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.card-meta h3 {
+    margin: 0;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.btn-clear {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-clear:hover {
+    color: #ff7b72;
+    border-color: #ff7b72;
+    background-color: rgba(248, 81, 73, 0.1);
+}
+
+.fusion-textarea {
+    width: 100%;
+    min-height: 220px;
+    background-color: transparent;
+    border: none;
+    color: #e6edf3;
+    font-family: inherit;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    padding: 1rem 1.2rem;
+    outline: none;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.card-statusbar {
+    padding: 0.5rem 1.2rem;
+    background-color: #0d1117;
+    border-top: 1px solid #21262d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    color: #8b949e;
+}
+
+.save-indicator {
+    color: #3fb950;
+    font-size: 0.78rem;
+}
+
+.entry-hint {
+    color: #58a6ff;
+    font-size: 0.78rem;
+}
+
+/* Tarjeta de resultado */
+.result-card {
+    border-color: rgba(56, 139, 253, 0.4);
+}
+
+.result-textarea {
+    min-height: 140px;
+    color: #7ee787;
+    background-color: #0d1117;
+}
+
+.btn-copy-result {
+    background-color: #238636;
+    border: 1px solid #2ea043;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.btn-copy-result:hover {
+    background-color: #2ea043;
+}
+
+.toast-feedback {
+    color: #3fb950;
+    font-weight: 700;
+    font-size: 0.82rem;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 600px) {
+    .fusion-workspace {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* =========================================
+   BOTÓN EXPANDIR Y MODAL PANORÁMICO
+   ========================================= */
+.result-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.btn-tool-action.expand {
+    background-color: #21262d;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 0.4rem 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    transition: all 0.15s ease;
+}
+
+.btn-tool-action.expand:hover {
+    background-color: #30363d;
+    border-color: #58a6ff;
+    color: #ffffff;
+}
+
+/* Modal Expandido */
+.fusion-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1.5rem;
+    box-sizing: border-box;
+}
+
+.fusion-modal-box {
+    background-color: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    width: 100%;
+    max-width: 1100px;
+    height: 82vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65);
+    overflow: hidden;
+    animation: modalEntrada 0.15s ease-out;
+}
+
+.fusion-modal-header {
+    background-color: #0d1117;
+    border-bottom: 1px solid #21262d;
+    padding: 0.85rem 1.4rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.fusion-modal-close {
+    background: transparent;
+    border: none;
+    color: #8b949e;
+    font-size: 1.5rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    margin-left: 0.5rem;
+}
+
+.fusion-modal-close:hover {
+    color: #f85149;
+}
+
+.fusion-modal-body {
+    flex: 1;
+    background-color: #0d1117;
+    padding: 1rem 1.4rem;
+    overflow: hidden;
+    display: flex;
+}
+
+.modal-expand-textarea {
+    width: 100%;
+    height: 100%;
+    background-color: transparent;
+    border: none;
+    color: #7ee787;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    outline: none;
+    resize: none;
+    overflow-y: auto;
+    box-sizing: border-box;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.fusion-modal-footer {
+    background-color: #0d1117;
+    border-top: 1px solid #21262d;
+    padding: 0.65rem 1.4rem;
+    font-size: 0.82rem;
+    color: #8b949e;
+    display: flex;
+    justify-content: flex-start;
+}

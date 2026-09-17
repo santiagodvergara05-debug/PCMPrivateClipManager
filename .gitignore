@@ -1,0 +1,65 @@
+# ==========================================
+# ENTORNOS VIRTUALES Y CACHÉ DE PYTHON
+# ==========================================
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# ==========================================
+# ARCHIVOS SENSIBLES Y CONFIGURACIÓN (.ENV)
+# ==========================================
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# BASES DE DATOS, SNAPSHOTS Y CUARENTENA
+# ==========================================
+*.db
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Archivos de aislamiento generados por CLI_chaos / Bootloader
+*.corrupt_*
+*.db.corrupt_*
+.env.corrupt_*
+
+# ==========================================
+# MULTIMEDIA LOCAL Y SUBIDAS
+# ==========================================
+# Ignora todas las capturas subidas pero conserva la estructura del directorio
+static/uploads/documentos/*
+!static/uploads/documentos/.gitkeep
+
+# ==========================================
+# RESPALDOS Y REGISTROS TEMPORALES
+# ==========================================
+backups/
+ultimo_backup.txt
+silenciar_backup.txt
+*.zip
+pcm_backup_*.json
+
+# ==========================================
+# COMPILADOS, PYINSTALLER Y EJECUTABLES
+# ==========================================
+dist/
+build/
+*.spec
+*.exe
+
+# ==========================================
+# SISTEMA OPERATIVO Y EDITORES
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

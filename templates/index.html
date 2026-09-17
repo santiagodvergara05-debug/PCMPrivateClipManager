@@ -1,0 +1,412 @@
+{% extends "base.html" %}
+
+{% block title %}PCMPrivateClipManager - Clips Rápidos{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/clips.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="clips-container">
+
+    <!-- Barra de búsqueda reactiva -->
+<!-- Fila combinada: Buscador reactivo y Botón Nuevo Clip -->
+    <div class="search-action-row">
+        <div class="search-input-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="buscadorClips" placeholder="Buscar por texto, título o categoría..." autocomplete="off">
+            <span id="contadorResultados" class="search-counter">{{ clips|length }} clips</span>
+        </div>
+
+        <button type="button" class="btn-new-clip-trigger" onclick="abrirModalCrear()">
+            ➕ Nuevo Clip
+        </button>
+    </div>
+
+    <!-- Barra interactiva de píldoras de filtrado por categoría -->
+    <nav class="category-filter-bar" id="barraFiltroCategorias">
+        <button type="button" class="cat-pill active" onclick="seleccionarFiltroCategoria('todas', this)">Todas</button>
+        <button type="button" class="cat-pill fav-pill" onclick="seleccionarFiltroCategoria('__fav__', this)">⭐ Fijados</button>
+        {% for cat in categorias %}
+        <button type="button" class="cat-pill" onclick="seleccionarFiltroCategoria('{{ cat|lower }}', this)">
+            {{ cat }}
+        </button>
+        {% endfor %}
+    </nav>
+
+    <!-- Grilla de Clips -->
+    <div class="clips-grid" id="contenedorClips">
+        {% for c in clips %}
+        <article class="clip-card {% if c.es_favorito == 1 %}clip-favorite{% endif %}" 
+                 id="card-{{ c.id }}"
+                 data-title="{{ c.titulo|lower }}" 
+                 data-content="{{ c.contenido|lower }}" 
+                 data-cat="{{ c.categoria|lower }}">
+            
+            <div class="clip-header">
+                <div class="clip-badges">
+                    <button type="button" class="badge-cat" onclick="filtrarDesdeTarjeta('{{ c.categoria|lower }}')" title="Filtrar por '{{ c.categoria }}'">
+                        {{ c.categoria }}
+                    </button>
+                    {% if c.es_favorito == 1 %}
+                        <span class="badge-fav">⭐ Fijado</span>
+                    {% endif %}
+                    {% if c.expira_en %}
+                        <span class="badge-expire" data-expira="{{ c.expira_en }}">
+                            ⏳ Calculando...
+                        </span>
+                    {% endif %}
+                </div>
+
+                <div class="clip-top-actions">
+                    <form action="{{ url_for('clips.alternar_favorito', clip_id=c.id) }}" method="POST" style="margin: 0;">
+                        <button type="submit" class="btn-star {% if c.es_favorito == 1 %}active{% endif %}" title="Fijar como favorito">
+                            ★
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="clip-body">
+                {% if c.titulo %}
+                    <h3 class="clip-title">{{ c.titulo }}</h3>
+                {% endif %}
+                <pre class="clip-text" id="clip-text-{{ c.id }}">{{ c.contenido }}</pre>
+            </div>
+
+            <div class="clip-footer">
+                <span class="clip-meta">{{ c.contenido.split()|length }} pal. · {{ c.contenido|length }} car.</span>
+                <div class="clip-buttons">
+                    <button type="button" class="btn-clip-action copy" onclick="copiarClip('clip-text-{{ c.id }}', this)">
+                        Copiar
+                    </button>
+                    <button type="button" class="btn-clip-action edit" onclick="abrirModalEditar('{{ c.id }}')">
+                        Editar
+                    </button>
+                    <button type="button" class="btn-clip-action delete" onclick="eliminarClip('{{ c.id }}', this)">
+                        Eliminar
+                    </button>
+                </div>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+
+    <div id="noResultados" class="no-results" style="display: none;">
+        <p>No se encontraron clips en esta categoría o criterio de búsqueda.</p>
+    </div>
+
+    <!-- 1. Modal: Crear Nuevo Clip -->
+    <div id="modalCrear" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>⚡ Nuevo Clip</h3>
+                <button type="button" class="modal-close" onclick="cerrarModalCrear()">&times;</button>
+            </div>
+            <form action="{{ url_for('clips.crear') }}" method="POST">
+                <div class="form-row-top" style="margin-bottom: 1rem;">
+                    <input type="text" name="titulo" placeholder="Título o etiqueta breve (opcional)..." class="input-dark title-input" autocomplete="off">
+                    
+                    <div class="category-toggle-group">
+                        <select id="selectCategoriaModal" name="categoria" class="input-dark category-select">
+                            {% for cat in categorias %}
+                            <option value="{{ cat }}" {% if cat == 'General' %}selected{% endif %}>📁 {{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <input type="text" id="inputNuevaCategoriaModal" class="input-dark category-input" placeholder="Nueva categoría..." style="display: none;" autocomplete="off">
+                        
+                        <button type="button" id="btnToggleNuevaCatModal" class="btn-cat-toggle" onclick="alternarModoNuevaCategoriaModal()" title="Crear nueva categoría">
+                            ➕ Nueva
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="textarea-wrapper" style="margin-bottom: 1rem;">
+                    <textarea id="clipTextareaModal" name="contenido" placeholder="Pega aquí tu prompt, enlace, fragmento o nota rápida..." required class="input-dark content-textarea" style="min-height: 150px;"></textarea>
+                </div>
+                
+                <div style="margin-bottom: 1.2rem; display: flex; align-items: center; justify-content: space-between;">
+                    <label for="crearDuracion" style="color: #8b949e; font-size: 0.85rem; font-weight: 600;">
+                        ⏳ Tiempo de vida:
+                    </label>
+                    <select id="crearDuracion" name="duracion" class="input-dark select-small" style="min-width: 200px;">
+                        <option value="0">⏳ Sin caducidad</option>
+                        <option value="10">10 minutos</option>
+                        <option value="60">1 hora</option>
+                        <option value="1440">24 horas</option>
+                        <option value="10080">7 días</option>
+                    </select>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="cerrarModalCrear()">Cancelar</button>
+                    <button type="submit" class="btn-create">⚡ Guardar Clip</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 2. Modal: Editar Clip Existente -->
+    <div id="modalEditar" class="modal-overlay" style="display: none;">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>✏️ Editar Clip</h3>
+                <button type="button" class="modal-close" onclick="cerrarModalEditar()">&times;</button>
+            </div>
+            <form id="formEditarClip" method="POST">
+                <div class="form-row-top" style="margin-bottom: 1rem;">
+                    <input type="text" id="editTitulo" name="titulo" placeholder="Título o etiqueta..." class="input-dark title-input" autocomplete="off">
+                    <input type="text" id="editCategoria" name="categoria" placeholder="Categoría..." class="input-dark category-input" autocomplete="off">
+                </div>
+                
+                <textarea id="editContenido" name="contenido" required class="input-dark content-textarea" style="min-height: 150px; margin-bottom: 1rem;"></textarea>
+                
+                <div style="margin-bottom: 1.2rem; display: flex; align-items: center; justify-content: space-between;">
+                    <label for="editDuracion" style="color: #8b949e; font-size: 0.85rem; font-weight: 600;">
+                        ⏳ Tiempo de vida:
+                    </label>
+                    <select id="editDuracion" name="duracion" class="input-dark select-small" style="min-width: 200px;">
+                        <option value="mantener" selected>Conservar tiempo actual</option>
+                        <option value="0">♾️ Quitar caducidad (Permanente)</option>
+                        <option value="10">Reiniciar a 10 minutos</option>
+                        <option value="60">Reiniciar a 1 hora</option>
+                        <option value="1440">Reiniciar a 24 horas</option>
+                        <option value="10080">Reiniciar a 7 días</option>
+                    </select>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="cerrarModalEditar()">Cancelar</button>
+                    <button type="submit" class="btn-create">💾 Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const buscador = document.getElementById("buscadorClips");
+    const contenedor = document.getElementById("contenedorClips");
+    const contador = document.getElementById("contadorResultados");
+    const cartelVacio = document.getElementById("noResultados");
+
+    let categoriaFiltroActual = "todas";
+    let modoNuevaCatModal = false;
+
+    // Control de Modal: Crear
+    function abrirModalCrear() {
+        document.getElementById("modalCrear").style.display = "flex";
+        setTimeout(() => {
+            const txt = document.getElementById("clipTextareaModal");
+            if (txt) txt.focus();
+        }, 50);
+    }
+
+    function cerrarModalCrear() {
+        document.getElementById("modalCrear").style.display = "none";
+    }
+
+    function alternarModoNuevaCategoriaModal() {
+        modoNuevaCatModal = !modoNuevaCatModal;
+        const select = document.getElementById("selectCategoriaModal");
+        const input = document.getElementById("inputNuevaCategoriaModal");
+        const btn = document.getElementById("btnToggleNuevaCatModal");
+
+        if (modoNuevaCatModal) {
+            select.style.display = "none";
+            select.removeAttribute("name");
+
+            input.style.display = "block";
+            input.setAttribute("name", "categoria");
+            input.value = "";
+            input.focus();
+
+            btn.innerText = "↩ Lista";
+            btn.classList.add("active-cat");
+        } else {
+            input.style.display = "none";
+            input.removeAttribute("name");
+
+            select.style.display = "block";
+            select.setAttribute("name", "categoria");
+
+            btn.innerText = "➕ Nueva";
+            btn.classList.remove("active-cat");
+        }
+    }
+
+    // Filtrado interactivo
+    function aplicarFiltros() {
+        const query = buscador.value.toLowerCase().trim();
+        const tarjetas = contenedor.querySelectorAll(".clip-card");
+        let visibles = 0;
+
+        tarjetas.forEach(card => {
+            const titulo = card.getAttribute("data-title") || "";
+            const contenido = card.getAttribute("data-content") || "";
+            const categoria = card.getAttribute("data-cat") || "";
+            const esFavorito = card.classList.contains("clip-favorite");
+
+            const coincideTexto = query === "" || titulo.includes(query) || contenido.includes(query) || categoria.includes(query);
+            
+            let coincideCat = true;
+            if (categoriaFiltroActual === "__fav__") {
+                coincideCat = esFavorito;
+            } else if (categoriaFiltroActual !== "todas") {
+                coincideCat = (categoria === categoriaFiltroActual);
+            }
+
+            if (coincideTexto && coincideCat) {
+                card.style.display = "";
+                visibles++;
+            } else {
+                card.style.display = "none";
+            }
+        });
+
+        contador.textContent = `${visibles} clip${visibles === 1 ? '' : 's'}`;
+        cartelVacio.style.display = visibles === 0 ? "block" : "none";
+    }
+
+    buscador.addEventListener("input", aplicarFiltros);
+
+    function seleccionarFiltroCategoria(categoria, btn) {
+        categoriaFiltroActual = categoria;
+        document.querySelectorAll(".cat-pill").forEach(p => p.classList.remove("active"));
+        if (btn) btn.classList.add("active");
+        aplicarFiltros();
+    }
+
+    function filtrarDesdeTarjeta(categoria) {
+        const pills = document.querySelectorAll(".cat-pill");
+        let matchEncontrado = null;
+
+        pills.forEach(pill => {
+            if (pill.getAttribute("onclick") && pill.getAttribute("onclick").includes(`'${categoria}'`)) {
+                matchEncontrado = pill;
+            }
+        });
+
+        if (matchEncontrado) {
+            seleccionarFiltroCategoria(categoria, matchEncontrado);
+        } else {
+            categoriaFiltroActual = categoria;
+            pills.forEach(p => p.classList.remove("active"));
+            aplicarFiltros();
+        }
+    }
+
+    // Eliminación reactiva
+    async function eliminarClip(id, btn) {
+        if (!confirm("¿Eliminar este clip permanentemente?")) return;
+
+        const card = document.getElementById(`card-${id}`);
+        try {
+            const res = await fetch(`/eliminar/${id}`, {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
+
+            if (res.ok) {
+                card.classList.add("card-removing");
+                setTimeout(() => {
+                    card.remove();
+                    aplicarFiltros();
+                }, 250);
+            } else {
+                window.location.reload();
+            }
+        } catch (err) {
+            window.location.href = `/eliminar/${id}`;
+        }
+    }
+
+    // Temporizador de expiración
+    function actualizarExpiraciones() {
+        const ahora = Math.floor(Date.now() / 1000);
+        const insignias = document.querySelectorAll(".badge-expire");
+
+        insignias.forEach(badge => {
+            const expira = parseInt(badge.getAttribute("data-expira"), 10);
+            const restantes = expira - ahora;
+
+            if (restantes <= 0) {
+                badge.textContent = "⏳ Expirado";
+                badge.classList.add("expired");
+                const card = badge.closest(".clip-card");
+                if (card && !card.classList.contains("card-removing")) {
+                    card.classList.add("card-removing");
+                    setTimeout(() => {
+                        card.remove();
+                        aplicarFiltros();
+                    }, 1000);
+                }
+            } else if (restantes < 60) {
+                badge.textContent = `⏳ ${restantes}s`;
+            } else if (restantes < 3600) {
+                const min = Math.floor(restantes / 60);
+                const seg = restantes % 60;
+                badge.textContent = `⏳ ${min}m ${seg < 10 ? '0' : ''}${seg}s`;
+            } else if (restantes < 86400) {
+                const horas = Math.floor(restantes / 3600);
+                const min = Math.floor((restantes % 3600) / 60);
+                badge.textContent = `⏳ ${horas}h ${min}m`;
+            } else {
+                const dias = Math.floor(restantes / 86400);
+                badge.textContent = `⏳ ${dias}d restante${dias > 1 ? 's' : ''}`;
+            }
+        });
+    }
+
+    setInterval(actualizarExpiraciones, 1000);
+    actualizarExpiraciones();
+
+    // Modal Editar
+    function abrirModalEditar(id) {
+        const card = document.getElementById(`card-${id}`);
+        const tituloElem = card.querySelector(".clip-title");
+        const catElem = card.querySelector(".badge-cat");
+        const textoElem = document.getElementById(`clip-text-${id}`);
+
+        document.getElementById("formEditarClip").action = `/editar/${id}`;
+        document.getElementById("editTitulo").value = tituloElem ? tituloElem.innerText : "";
+        document.getElementById("editCategoria").value = catElem ? catElem.innerText.trim() : "General";
+        document.getElementById("editContenido").value = textoElem ? textoElem.innerText : "";
+        document.getElementById("editDuracion").value = "mantener";
+
+        document.getElementById("modalEditar").style.display = "flex";
+    }
+
+    function cerrarModalEditar() {
+        document.getElementById("modalEditar").style.display = "none";
+    }
+
+    // Atajos de cierre global (Escape y click afuera)
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            cerrarModalCrear();
+            cerrarModalEditar();
+        }
+    });
+
+    document.getElementById("modalCrear").addEventListener("click", (e) => {
+        if (e.target.id === "modalCrear") cerrarModalCrear();
+    });
+
+    document.getElementById("modalEditar").addEventListener("click", (e) => {
+        if (e.target.id === "modalEditar") cerrarModalEditar();
+    });
+
+    // Copiado universal compatible con LAN
+    function copiarClip(idElemento, btn) {
+        const elemento = document.getElementById(idElemento);
+        if (elemento && window.copiarTextoUniversal) {
+            window.copiarTextoUniversal(elemento.innerText, btn);
+        }
+    }
+</script>
+{% endblock %}

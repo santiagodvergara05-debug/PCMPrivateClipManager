@@ -57,6 +57,11 @@ ARCHIVOS = [
         JS_DIR,
         "marked-footnote.min.js",
     ),
+    (
+        "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js",
+        JS_DIR,
+        "mermaid.min.js",
+    ),
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (descarga-librerias-script)"}

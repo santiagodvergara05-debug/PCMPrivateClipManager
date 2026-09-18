@@ -24,7 +24,7 @@ RUTA_ULTIMO_BACKUP = "ultimo_backup.txt"
 
 CATEGORIAS_TEXTO_LARGO = ('Novelas', 'Borrador', 'Resumen')
 CARPETA_IMAGENES_DOCS = os.path.join("static", "uploads", "documentos")
-EXTENSIONES_IMAGENES = {"png", "jpg", "jpeg", "gif", "webp", "svg"}
+EXTENSIONES_IMAGENES = {"png", "jpg", "jpeg", "gif", "webp" }
 
 
 # ==========================================

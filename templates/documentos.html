@@ -37,7 +37,7 @@
             <button type="button" class="btn-doc-tool" onclick="insertarSaltoPagina()" title="Insertar un corte de página para el PDF">
                 ✂️ Salto A4
             </button>
-            <button type="button" class="btn-doc-tool" onclick="insertarEjemploMath()" title="Cargar ejemplo con fórmulas y tablas">
+            <button type="button" class="btn-doc-tool" onclick="insertarEjemploMath()" title="Cargar ejemplo con fórmulas, tablas y diagramas">
                 📐 Ejemplo
             </button>
             <button type="button" class="btn-doc-tool" onclick="copiarMarkdown(this)">
@@ -58,11 +58,11 @@
         <!-- Panel 1: Editor Markdown -->
         <section class="docs-panel editor-panel no-print">
             <div class="panel-header">
-                <span>✏️ Editor Markdown & LaTeX</span>
+                <span>✏️ Editor Markdown, LaTeX & Diagramas</span>
                 <span id="docStats" class="panel-stats">0 palabras · 0 caracteres</span>
             </div>
             <textarea id="docInput" class="doc-textarea" 
-                      placeholder="Pega aquí texto, fórmulas KaTeX ($...$), tablas o pega imágenes directamente con Ctrl + V..." 
+                      placeholder="Pega aquí texto, fórmulas ($...$), tablas, diagramas (```mermaid) o imágenes con Ctrl + V..." 
                       spellcheck="false" autofocus>{{ doc['contenido'] if doc else '' }}</textarea>
         </section>
 
@@ -112,6 +112,7 @@
 <script src="{{ url_for('static', filename='js/purify.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/katex.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/marked-footnote.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mermaid.min.js') }}"></script>
 
 <script>
     const input = document.getElementById("docInput");
@@ -123,7 +124,7 @@
     const modalImagenes = document.getElementById("modalImagenes");
     const contenedorGaleria = document.getElementById("contenedorGaleria");
 
-    // URLs obtenidas de forma limpia desde atributos del contenedor
+    // URLs obtenidas desde atributos del contenedor
     const docsContainer = document.querySelector(".docs-container");
     const URL_SUBIR_IMG = docsContainer.getAttribute("data-url-subir");
     const URL_LISTAR_IMG = docsContainer.getAttribute("data-url-imagenes");
@@ -131,7 +132,11 @@
     // ID del documento cargado (null si es nuevo)
     const docIdInput = document.getElementById("docId");
     let currentDocId = docIdInput && docIdInput.value ? parseInt(docIdInput.value, 10) : null;
-    let hayCambiosSinGuardar = false;
+
+    // Control de versiones y estado sucio contra carreras asincronas
+    let revision = 0;
+    let revisionGuardada = 0;
+    let hayCambiosSinGuardar = false; // Candado para evitar múltiples envíos simultáneos
 
     if (window.marked) {
         marked.setOptions({
@@ -144,92 +149,148 @@
         }
     }
 
-    // Motor Token Shield
+// Inicializar Mermaid en modo seguro y estricto
+    if (window.mermaid) {
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'default',
+            securityLevel: 'strict', // Blindaje contra inyección XSS
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif'
+        });
+    }
+    
+    function escaparHTML(texto) {
+    return String(texto)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    // Motor Token Shield: Aislamiento estricto y renderizado multietapa
     function renderizarDocumento() {
         const rawText = input.value;
-
-        if (!rawText.trim()) {
-            output.innerHTML = '<p class="empty-render-msg no-print">El documento formateado se previsualizará aquí en tiempo real...</p>';
-            actualizarMetricas(0, 0);
-            return;
-        }
-
-        const mathTokens = [];
-        const codeTokens = [];
-        const escapedDollars = [];
-        let mathIndex = 0;
-        let codeIndex = 0;
-        let dollarIndex = 0;
         let texto = rawText;
+
+        // Generar un nonce único por render (blindaje contra colisiones)
+        const nonce = Math.random().toString(36).substring(2, 8);
+
+        // Arrays de almacenamiento aislado
+        const codeTokens = [];
+        let codeIndex = 0;
+        const mathTokens = [];
+        let mathIndex = 0;
+        const mermaidTokens = [];
+        let mermaidIndex = 0;
+        const escapedDollars = [];
+        let dollarIndex = 0;
+        const strikethroughTokens = [];
+        let strikeIndex = 0;
+
+        // Prefijos dinámicos efímeros vinculados al nonce
+   // Prefijos dinámicos unificados bajo el mismo nonce
+    const CODE_PREFIX   = `@@PCM_${nonce}_CODE_`;
+    const MATH_PREFIX   = `@@PCM_${nonce}_MATH_`;
+    const MERMAID_PREFIX = `@@PCM_${nonce}_MERMAID_`;
+    const DOLLAR_PREFIX = `@@PCM_${nonce}_DOLLAR_`;
+    const STRIKE_PREFIX = `@@PCM_${nonce}_STRIKE_`;
+
+        // 0. Diagramas Mermaid
+        texto = texto.replace(/(?:^|\n)[ \t]*```+mermaid[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```+[ \t]*(?:\n|$)/gi, (match, diagramCode) => {
+            const key = `${MERMAID_PREFIX}${mermaidIndex++}@@`;
+            mermaidTokens.push({ key, code: diagramCode.trim() });
+            return `\n\n${key}\n\n`;
+        });
 
         // 1. Bloques de código
         texto = texto.replace(/(```[\s\S]*?```)/g, (match) => {
-            const key = `@@CODEBLOCK_${codeIndex++}@@`;
+            const key = `${CODE_PREFIX}BLOCK_${codeIndex++}@@`;
             codeTokens.push({ key, val: match });
             return key;
         });
 
-        texto = texto.replace(/(`[^`\n]+?`)/g, (match) => {
-            const key = `@@CODEINLINE_${codeIndex++}@@`;
+        // 1.1 Código inline
+        texto = texto.replace(/(?<!`)(`+)(.+?)(?<!`)\1(?!`)/g, (match) => {
+            const key = `${CODE_PREFIX}INLINE_${codeIndex++}@@`;
             codeTokens.push({ key, val: match });
             return key;
         });
 
         // 2. Dólares literales escapados (\$)
         texto = texto.replace(/\\\$/g, () => {
-            const key = `@@DOLLAR_LITERAL_${dollarIndex++}@@`;
+            const key = `${DOLLAR_PREFIX}${dollarIndex++}@@`;
             escapedDollars.push({ key, val: "$" });
             return key;
         });
 
-        // 3. Salto de página manual seguro
-        texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');
-
-        // 4. Bloques matemáticos
+        // 3. Salto de página manual para PDF
+        texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');          // 4. Bloques matemáticos explícitos ($$ y \[)
         texto = texto.replace(/\$\$([\s\S]*?)\$\$/g, (match, expr) => {
-            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: true });
             return `\n\n${key}\n\n`;
         });
 
         texto = texto.replace(/(?:^|\n)[ \t]*\\\[([\s\S]*?)\\\][ \t]*(?:\n|$)/g, (match, expr) => {
-            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: true });
             return `\n\n${key}\n\n`;
         });
 
-        // 5. Fórmulas inline acotadas a la misma línea
+        // 4.5 Entornos LaTeX huérfanos con retroreferencia \2
+        texto = texto.replace(/(?:^|\n)[ \t]*(\\begin\{(align\*?|gather\*?|aligned|matrix|pmatrix|bmatrix|vmatrix|cases|equation\*?)\}[\s\S]*?\\end\{\2\})[ \t]*(?:\n|$)/g, (match, expr) => {
+            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: true });
+            return `\n\n${key}\n\n`;
+        });
+
+        // 5. Fórmulas inline (\( y $)
         texto = texto.replace(/\\\(([\s\S]*?)\\\)/g, (match, expr) => {
-            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: false });
             return key;
         });
 
         texto = texto.replace(/(?<![\$\w\\])\$([^\s\$\n](?:[^\$\n]*?[^\s\$\n])?)\$(?![\$\w])/g, (match, expr) => {
-            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: false });
             return key;
         });
 
-        // 6. Restaurar código y caracteres protegidos
+        // 5.5 Formateo extendido
+        texto = texto.replace(/~~([^\s~](?:[\s\S]*?[^\s~])?)~~/g, (match, contenido) => {
+            const key = `${STRIKE_PREFIX}${strikeIndex++}@@`;
+            strikethroughTokens.push({ key, val: `<del>${contenido}</del>` });
+            return key;
+        });
+
+        texto = texto.replace(/(?<!=)==([^\s=](?:[^=\n]*?[^\s=])?)==(?!=)/g, '<mark>$1</mark>');
+        texto = texto.replace(/(?<!~)~([^\s~]+?)~(?!~)/g, '<sub>$1</sub>');
+        texto = texto.replace(/(?<!\^)\^([^\s\^]+?)\^(?!\^)/g, '<sup>$1</sup>');
+
+        // Restauración de tachados GFM
+        strikethroughTokens.forEach(item => {
+            texto = texto.replace(item.key, () => item.val);
+        });
+
+        // 6. Restauración segura de bloques y caracteres especiales
         codeTokens.forEach(item => {
-            texto = texto.replace(item.key, item.val);
+            texto = texto.replace(item.key, () => item.val);
         });
 
         escapedDollars.forEach(item => {
-            texto = texto.replace(item.key, item.val);
+            texto = texto.replace(item.key, () => item.val);
         });
 
-        // 7. Parsear Markdown y Sanitizar
+        // 7. Parsear Markdown y Sanitizar con DOMPurify
         let parsedHtml = marked.parse(texto);
         let safeHtml = DOMPurify.sanitize(parsedHtml, {
-            ADD_TAGS: ['div', 'span', 'p', 'img'],
-            ADD_ATTR: ['width', 'height', 'align', 'style', 'class']
+            ADD_TAGS: ['div', 'span', 'p', 'img', 'sub', 'sup', 'mark', 'kbd', 'details', 'summary'],
+            ADD_ATTR: ['width', 'height', 'align', 'class', 'open']
         });
 
-        // 8. Inyectar KaTeX
-
-        // 8. Inyectar KaTeX
+        // 8. Inyectar KaTeX tolerante a fallos y blindado contra XSS
         mathTokens.forEach(tok => {
             let rendered = "";
             try {
@@ -238,22 +299,54 @@
                     throwOnError: false
                 });
             } catch (err) {
-                rendered = `<span class="katex-error">${tok.expr}</span>`;
+                // tok.expr NUNCA debe inyectarse crudo en el HTML
+                rendered = `<span class="katex-error">${escaparHTML(tok.expr)}</span>`;
             }
 
-            if (tok.display) {
-                const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
-                if (pWrapper.test(safeHtml)) {
-                    safeHtml = safeHtml.replace(pWrapper, `<div class="katex-display-wrapper">${rendered}</div>`);
-                } else {
-                    safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), `<div class="katex-display-wrapper">${rendered}</div>`);
-                }
+            const bloqueKaTeX = tok.display ? `<div class="katex-display-wrapper">${rendered}</div>` : rendered;
+            const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+
+            if (tok.display && pWrapper.test(safeHtml)) {
+                safeHtml = safeHtml.replace(pWrapper, () => bloqueKaTeX);
             } else {
-                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), rendered);
+                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueKaTeX);
+            }
+        });
+
+        // 9. Inyectar Mermaid
+        mermaidTokens.forEach(tok => {
+            const codigoEscapado = tok.code
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            const bloqueMermaid = `<div class="mermaid-diagram-wrapper"><div class="mermaid">${codigoEscapado}</div></div>`;
+            const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+
+            if (pWrapper.test(safeHtml)) {
+                safeHtml = safeHtml.replace(pWrapper, () => bloqueMermaid);
+            } else {
+                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueMermaid);
             }
         });
 
         output.innerHTML = safeHtml;
+
+        // 10. Compilar diagramas Mermaid en el DOM
+        if (window.mermaid && mermaidTokens.length > 0) {
+            try {
+                const nodos = output.querySelectorAll('.mermaid');
+                if (typeof mermaid.run === "function") {
+                    mermaid.run({ nodes: nodos }).catch(err => {
+                        console.warn("Fallo al compilar diagrama Mermaid:", err);
+                    });
+                } else if (typeof mermaid.init === "function") {
+                    mermaid.init(undefined, nodos);
+                }
+            } catch (err) {
+                console.warn("Error en ejecución de Mermaid:", err);
+            }
+        }
 
         const palabras = rawText.trim() === "" ? 0 : rawText.trim().split(/\s+/).length;
         actualizarMetricas(palabras, rawText.length);
@@ -264,14 +357,20 @@
     }
 
     function marcarModificado() {
-        hayCambiosSinGuardar = true;
-        saveStatus.textContent = "🟡 Sin guardar";
-        saveStatus.className = "save-status-badge status-unsaved";
+    revision++;
+    hayCambiosSinGuardar = true;
+    saveStatus.textContent = "🟡 Sin guardar";
+    saveStatus.className = "save-status-badge status-unsaved";
     }
 
+    // Amortiguador de renderizado (Debounce) para evitar tirones al escribir rápido
+    let debounceTimer = null;
     input.addEventListener("input", () => {
         marcarModificado();
-        renderizarDocumento();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            renderizarDocumento();
+        }, 70);
     });
 
     tituloInput.addEventListener("input", marcarModificado);
@@ -311,18 +410,27 @@
 
             const data = await resp.json();
             if (data.ok) {
-                insertarTextoEnCursor(`\n\n![${data.nombre}](${data.url})\n\n`);
-                saveStatus.textContent = "🟢 Imagen adjuntada";
-                saveStatus.className = "save-status-badge status-saved";
-                setTimeout(() => {
-                    saveStatus.textContent = hayCambiosSinGuardar ? "🟡 Sin guardar" : "🟢 Listo";
-                    saveStatus.className = hayCambiosSinGuardar ? "save-status-badge status-unsaved" : "save-status-badge";
-                }, 2000);
-            } else {
-                alert(data.error || "No se pudo subir la imagen.");
-                saveStatus.textContent = "🔴 Error de subida";
-                saveStatus.className = "save-status-badge status-error";
+            // 1. Vincular el ID retornado por Flask (vital para documentos nuevos)
+            if (data.id) {
+                currentDocId = data.id;
+                if (docIdInput) {
+                    docIdInput.value = data.id;
+                }
             }
+
+            // 2. Control de carreras asíncronas
+            revisionGuardada = revisionEnviada;
+
+            if (revision === revisionGuardada) {
+                hayCambiosSinGuardar = false;
+                saveStatus.textContent = "🟢 Guardado";
+                saveStatus.className = "save-status-badge status-saved";
+            } else {
+                hayCambiosSinGuardar = true;
+                saveStatus.textContent = "🟡 Sin guardar";
+                saveStatus.className = "save-status-badge status-unsaved";
+            }
+        }
         } catch (err) {
             console.error(err);
             alert("Error de conexión al subir la imagen.");
@@ -331,7 +439,7 @@
         }
     }
 
-    // 1. Pegado directo (Ctrl + V)
+    // 1. Pegado directo de imágenes (Ctrl + V)
     input.addEventListener("paste", (e) => {
         const items = (e.clipboardData || window.clipboardData).items;
         for (let item of items) {
@@ -344,7 +452,7 @@
         }
     });
 
-    // 2. Arrastrar y soltar sobre el editor (Drag & Drop)
+    // 2. Drag & Drop sobre el editor
     input.addEventListener("dragover", (e) => {
         e.preventDefault();
         input.classList.add("textarea-dragover");
@@ -365,7 +473,7 @@
         }
     });
 
-    // 3. Subida desde explorador de Windows
+    // 3. Subida manual desde explorador
     function seleccionarArchivoImagen() {
         fileInputImagen.click();
     }
@@ -378,7 +486,7 @@
         }
     });
 
-// 4. Modal de galería
+    // 4. Modal de galería
     async function abrirModalImagenes() {
         modalImagenes.style.display = "flex";
         document.body.style.overflow = "hidden";
@@ -393,23 +501,51 @@
                 data.imagenes.forEach(img => {
                     const card = document.createElement("div");
                     card.className = "gallery-item";
-                    card.innerHTML = `
-                        <img src="${img.url}" alt="${img.nombre}" loading="lazy">
-                        <div class="gallery-item-info">
-                            <span class="gallery-item-name" title="${img.nombre}">${img.nombre}</span>
-                            <div class="gallery-item-actions">
-                                <button type="button" class="btn-insert-img" onclick="insertarImagenSeleccionada('${img.url}', '${img.nombre}')">
-                                    ➕ Insertar
-                                </button>
-                                <button type="button" class="btn-delete-img" title="Eliminar imagen del disco" onclick="eliminarImagenGaleria('${img.nombre}')">
-                                    🗑️
-                                </button>
-                            </div>
-                        </div>
-                    `;
+
+                    const imgEl = document.createElement("img");
+                    imgEl.src = img.url;
+                    imgEl.alt = img.nombre;
+                    imgEl.loading = "lazy";
+
+                    const infoDiv = document.createElement("div");
+                    infoDiv.className = "gallery-item-info";
+
+                    const nameSpan = document.createElement("span");
+                    nameSpan.className = "gallery-item-name";
+                    nameSpan.title = img.nombre;
+                    nameSpan.textContent = img.nombre;
+
+                    const actionsDiv = document.createElement("div");
+                    actionsDiv.className = "gallery-item-actions";
+
+                    const btnInsert = document.createElement("button");
+                    btnInsert.type = "button";
+                    btnInsert.className = "btn-insert-img";
+                    btnInsert.textContent = "➕ Insertar";
+                    btnInsert.addEventListener("click", () => {
+                        insertarImagenSeleccionada(img.url, img.nombre);
+                    });
+
+                    const btnDelete = document.createElement("button");
+                    btnDelete.type = "button";
+                    btnDelete.className = "btn-delete-img";
+                    btnDelete.title = "Eliminar imagen del disco";
+                    btnDelete.textContent = "🗑️";
+                    btnDelete.addEventListener("click", () => {
+                        eliminarImagenGaleria(img.nombre);
+                    });
+
+                    actionsDiv.appendChild(btnInsert);
+                    actionsDiv.appendChild(btnDelete);
+                    infoDiv.appendChild(nameSpan);
+                    infoDiv.appendChild(actionsDiv);
+                    card.appendChild(imgEl);
+                    card.appendChild(infoDiv);
+
                     contenedorGaleria.appendChild(card);
                 });
-            } else {
+            } 
+            else {
                 contenedorGaleria.innerHTML = '<p class="gallery-loading">No hay imágenes subidas todavía en el servidor.</p>';
             }
         } catch (err) {
@@ -442,49 +578,62 @@
     // ==========================================
     // GUARDADO ASÍNCRONO EN SQLITE
     // ==========================================
-    async function guardarDocumento() {
-        let titulo = tituloInput.value.trim();
-        const contenido = input.value;
+let guardandoEnProgreso = false;
 
-        if (!titulo) {
-            const primerH1 = contenido.match(/^#+\s+(.+)$/m);
-            titulo = primerH1 ? primerH1[1].trim() : "Documento sin título";
-            tituloInput.value = titulo;
-        }
+async function guardarDocumento() {
+        // Candado activo: evita peticiones cruzadas en LAN / WiFi
+        if (guardandoEnProgreso) return;
 
+        guardandoEnProgreso = true;
+        const revisionEnviada = revision;
         saveStatus.textContent = "⏳ Guardando...";
         saveStatus.className = "save-status-badge status-saving";
 
         try {
-            const resp = await fetch("{{ url_for('clips.api_guardar_documento') }}", {
+            const res = await fetch("{{ url_for('clips.api_guardar_documento') }}", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     id: currentDocId,
-                    titulo: titulo,
-                    contenido: contenido
+                    titulo: tituloInput.value.trim() || "Documento sin título",
+                    contenido: input.value
                 })
             });
 
-            const data = await resp.json();
-            if (data.ok) {
-                currentDocId = data.id;
-                if (docIdInput) docIdInput.value = data.id;
-                
-                hayCambiosSinGuardar = false;
-                saveStatus.textContent = "🟢 Guardado";
-                saveStatus.className = "save-status-badge status-saved";
+            const data = await res.json();
 
-                if (!window.location.pathname.includes(String(currentDocId))) {
-                    window.history.replaceState(null, "", `/documentos/estudio/${currentDocId}`);
+            if (data.ok) {
+                // 1. Restaurar persistencia de ID retornado (evita duplicar docs nuevos)
+                if (data.id) {
+                    currentDocId = data.id;
+                    if (docIdInput) {
+                        docIdInput.value = data.id;
+                    }
+                }
+
+                // 2. Control de estado reactivo
+                revisionGuardada = revisionEnviada;
+
+                if (revision === revisionGuardada) {
+                    hayCambiosSinGuardar = false;
+                    saveStatus.textContent = "🟢 Guardado";
+                    saveStatus.className = "save-status-badge status-saved";
+                } else {
+                    hayCambiosSinGuardar = true;
+                    saveStatus.textContent = "🟡 Sin guardar";
+                    saveStatus.className = "save-status-badge status-unsaved";
                 }
             } else {
-                throw new Error("Error en respuesta");
+                saveStatus.textContent = "🔴 Error al guardar";
+                saveStatus.className = "save-status-badge status-error";
+                alert(data.error || "No se pudo guardar el documento.");
             }
         } catch (err) {
-            console.error(err);
-            saveStatus.textContent = "🔴 Error al guardar";
+            saveStatus.textContent = "🔴 Error de red";
             saveStatus.className = "save-status-badge status-error";
+        } finally {
+            // Se libera el cerrojo siempre, incluso si falló la red
+            guardandoEnProgreso = false;
         }
     }
 
@@ -500,7 +649,7 @@
     // SINCRONIZACIÓN POR CLIC BIDIRECCIONAL
     // ==========================================
     output.addEventListener("click", (e) => {
-        const elemento = e.target.closest("h1, h2, h3, h4, h5, p, li, tr, blockquote, pre");
+        const elemento = e.target.closest("h1, h2, h3, h4, h5, p, li, tr, blockquote, pre, .mermaid-diagram-wrapper");
         if (!elemento) return;
 
         let textoBuscado = elemento.innerText.trim();
@@ -547,7 +696,7 @@
         if (textoLimpio.length > 25) textoLimpio = textoLimpio.substring(0, 25);
         if (textoLimpio.length < 3) return;
 
-        const elementos = output.querySelectorAll("h1, h2, h3, h4, h5, p, li, blockquote, pre, td, th");
+        const elementos = output.querySelectorAll("h1, h2, h3, h4, h5, p, li, blockquote, pre, td, th, .mermaid-diagram-wrapper");
         for (let el of elementos) {
             if (el.innerText && el.innerText.includes(textoLimpio)) {
                 el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -559,7 +708,7 @@
     });
 
     function insertarSaltoPagina() {
-        insertarTextoEnCursor("\n\n\\newpage\n\n");
+    insertarTextoEnCursor("\n\n\\newpage\n\n");
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -594,7 +743,6 @@
         }
     }
 
-
     async function eliminarImagenGaleria(nombreArchivo) {
         if (!confirm(`¿Eliminar definitivamente «${nombreArchivo}» del servidor?`)) {
             return;
@@ -607,7 +755,7 @@
             const data = await resp.json();
 
             if (data.ok) {
-                abrirModalImagenes(); // Refrescar la galería automáticamente
+                abrirModalImagenes();
             } else {
                 alert(data.error || "No se pudo eliminar la imagen.");
             }
@@ -618,37 +766,50 @@
     }
 
     function insertarEjemploMath() {
-        const ejemplo = `# Análisis Matemático y Tablas Técnicas
+        const ejemplo = `# Análisis Técnico, Ecuaciones y Diagramas de Flujo
 
-Este documento contiene cálculos, tablas y fórmulas generadas por IA.
+Este documento evalúa expresiones matemáticas complejas, tablas y arquitecturas con Mermaid.
 
 ---
 
-### 1. Ecuaciones y Cálculo Integral
+### 1. Ecuaciones y Cálculo Matricial
 
-La integral gaussiana extendida sobre todo el plano real se define como:
+La aproximación analítica de optimización lineal queda definida por:
 
-$$ \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi} $$
+$$
+\begin{align*}
+f(x) &= x^2 + 2x + 1 \\
+     &= (x + 1)^2
+\end{align*}
+$$
 
 \\newpage
 
-### 2. Tabla Comparativa de Modelos
+### 2. Flujo de Ejecución y Pipeline del Bootloader
 
-| Parámetro | Modelo 7B | Modelo 70B |
-| :--- | :--- | :--- |
-| **VRAM Mínima** | 6 GB | 40 GB |
-| **Cuantización** | Q4_K_M | Q8_0 |
-| **Rendimiento** | 65 tok/s | 18 tok/s |
+\`\`\`mermaid
+graph TD
+    A[Punto de Entrada: app.py] --> B{¿Existe .env?}
+    B -- No --> C[Aprovisionar claves de 256 bits]
+    B -- Sí --> D[Sanitizar UTF-8 y Puertos]
+    C --> E[Auditoría SQLite PRAGMA]
+    D --> E
+    E --> F[Levantar Servidor HTTP Flask]
+\`\`\`
 
 ---
 
-### 3. Diagrama o Gráfica
+### 3. Métricas de Rendimiento
 
-![Logo](https://raw.githubusercontent.com/santiagodvergara05-debug/PCMPrivateClipManager/main/static/img/favicon.png)
+| Etapa | Latencia | Estado |
+| :--- | :--- | :--- |
+| Bootloader Init | 12 ms | Óptimo |
+| Parseo KaTeX | 4 ms | Vectorial |
+| Render Mermaid | 18 ms | SVG Nativo |
 `;
         input.value = ejemplo;
         if (!tituloInput.value.trim()) {
-            tituloInput.value = "Análisis Matemático y Tablas Técnicas";
+            tituloInput.value = "Análisis Técnico y Diagramas";
         }
         marcarModificado();
         renderizarDocumento();

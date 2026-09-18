@@ -138,7 +138,6 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     font-size: 1rem;
     line-height: 1.7;
-    /* Ajuste de palabra para evitar desbordes */
     overflow-wrap: anywhere;
     word-wrap: break-word;
     word-break: break-word;
@@ -152,10 +151,13 @@
     margin-top: 3rem;
 }
 
-/* Estilos de contenido Markdown en hoja blanca */
+/* Encabezados y protección inline para fórmulas/subíndices */
 .doc-rendered-sheet h1, 
 .doc-rendered-sheet h2, 
-.doc-rendered-sheet h3 {
+.doc-rendered-sheet h3,
+.doc-rendered-sheet h4,
+.doc-rendered-sheet h5,
+.doc-rendered-sheet h6 {
     color: #1f2328;
     border-bottom: 1px solid #d0d7de;
     padding-bottom: 0.35rem;
@@ -165,9 +167,19 @@
     word-break: break-word;
 }
 
+.doc-rendered-sheet h1 *, 
+.doc-rendered-sheet h2 *, 
+.doc-rendered-sheet h3 *, 
+.doc-rendered-sheet h4 *,
+.doc-rendered-sheet h5 *,
+.doc-rendered-sheet h6 * {
+    display: inline !important;
+}
+
 .doc-rendered-sheet h1 { font-size: 1.8rem; }
 .doc-rendered-sheet h2 { font-size: 1.4rem; }
 .doc-rendered-sheet h3 { font-size: 1.15rem; }
+.doc-rendered-sheet h4 { font-size: 1.05rem; }
 
 .doc-rendered-sheet p {
     margin: 0.75rem 0;
@@ -182,22 +194,28 @@
     margin: 1.5rem 0;
 }
 
-/* Tablas con borde limpio */
+/* Tablas con protección de ancho mínimo para columnas cortas */
 .doc-rendered-sheet table {
     border-collapse: collapse;
     width: 100%;
-    margin: 1.2rem 0;
-    word-break: break-word;
+    margin: 1.4rem 0;
+    font-size: 0.9rem;
 }
 
 .doc-rendered-sheet th, 
 .doc-rendered-sheet td {
     border: 1px solid #d0d7de;
-    padding: 0.55rem 0.85rem;
-    font-size: 0.92rem;
+    padding: 0.5rem 0.75rem;
     text-align: left;
-    overflow-wrap: anywhere;
-    word-break: break-word;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    white-space: normal;
+}
+
+.doc-rendered-sheet table th:first-child,
+.doc-rendered-sheet table td:first-child {
+    white-space: nowrap !important;
+    width: 1%;
 }
 
 .doc-rendered-sheet th {
@@ -205,7 +223,7 @@
     font-weight: 700;
 }
 
-/* Imágenes responsivas */
+/* Imágenes */
 .doc-rendered-sheet img {
     max-width: 100%;
     height: auto;
@@ -234,6 +252,11 @@
     overflow-wrap: anywhere;
 }
 
+.doc-rendered-sheet pre code {
+    padding: 0;
+    background-color: transparent;
+}
+
 /* Fórmulas matemáticas KaTeX */
 .katex-display {
     margin: 1.2rem 0 !important;
@@ -252,7 +275,17 @@
     margin: 0 !important;
 }
 
-/* Estilo formal para citas tipo bloque */
+.katex-error {
+    color: #cf222e;
+    background-color: #ffebe9;
+    border: 1px dashed #ff8182;
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85em;
+}
+
+/* Citas en bloque */
 .doc-rendered-sheet blockquote {
     margin: 1rem 0;
     padding: 0.6rem 1.2rem;
@@ -312,7 +345,6 @@
     user-select: none;
 }
 
-/* Efecto destello de sincronización */
 .sync-flash {
     outline: 2px solid #3b82f6;
     background-color: rgba(59, 130, 246, 0.12) !important;
@@ -323,7 +355,6 @@
 /* =========================================
    ESTILOS DE LA BIBLIOTECA (HUB DE DOCUMENTOS)
    ========================================= */
-
 .docs-hub-container {
     max-width: 1400px;
     width: 95%;
@@ -654,9 +685,8 @@
 }
 
 /* =========================================
-   MODAL DE VISTA PREVIA RENDERIZADA
+   MODALES Y GALERÍA
    ========================================= */
-
 .doc-modal-overlay {
     position: fixed;
     top: 0;
@@ -757,7 +787,6 @@
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
-/* Modal e inserción de imágenes */
 .textarea-dragover {
     border: 2px dashed #58a6ff !important;
     background-color: rgba(56, 139, 253, 0.05) !important;
@@ -878,7 +907,7 @@
     color: #f85149;
 }
 
-/* Pantallas pequeñas */
+/* Pantallas reducidas */
 @media (max-width: 850px) {
     .docs-workspace {
         grid-template-columns: 1fr;
@@ -898,7 +927,7 @@
         margin: 18mm 15mm 18mm 15mm;
     }
 
-    /* 1. Ocultar interfaz del sistema, menús y botones */
+    /* 1. Supresión de interfaz y modales */
     .app-header,
     .app-footer,
     .docs-toolbar,
@@ -908,15 +937,18 @@
     .hub-header,
     .hub-control-bar,
     .docs-grid,
-    .modal-gallery-container,
     .editor-panel,
+    .editor-panel *,
+    #fileInputImagen,
+    #modalImagenes,
+    .modal-gallery-container,
     .no-print,
     .btn,
     button {
         display: none !important;
     }
 
-    /* 2. Reset estructural de la página */
+    /* 2. Reset estructural plano */
     html, body, .app-layout, .main-content, .docs-container {
         background: #ffffff !important;
         background-color: #ffffff !important;
@@ -928,58 +960,20 @@
         min-height: 0 !important;
     }
 
-    /* 3. Desmontar el modal y desplegarlo como documento plano continuo */
-    .doc-modal-overlay {
-        position: static !important;
-        display: block !important;
-        width: 100% !important;
-        height: auto !important;
-        background: transparent !important;
-        backdrop-filter: none !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        z-index: auto !important;
-    }
-
-    .doc-modal-container {
-        position: static !important;
-        display: block !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        height: auto !important;
-        max-height: none !important;
-        background: transparent !important;
-        border: none !important;
-        border-radius: 0 !important;
-        box-shadow: none !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }
-
-    .doc-modal-body {
-        position: static !important;
-        display: block !important;
-        background: transparent !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        overflow: visible !important;
-    }
-
-    .doc-workspace {
+    .docs-workspace {
         display: block !important;
         height: auto !important;
     }
 
-    .docs-panel,
     .preview-panel {
         border: none !important;
         background: transparent !important;
         display: block !important;
+        width: 100% !important;
     }
 
-    /* 4. Hoja renderizada a tamaño completo sin marcos ni sombras */
-    .doc-rendered-sheet,
-    .doc-modal-body .doc-rendered-sheet {
+    /* 3. Hoja A4 limpia */
+    .doc-rendered-sheet {
         width: 100% !important;
         max-width: 100% !important;
         background: #ffffff !important;
@@ -994,7 +988,7 @@
         line-height: 1.5 !important;
     }
 
-    /* 5. Supresión total de scrollbars */
+    /* 4. Supresión total de scrollbars */
     * {
         scrollbar-width: none !important;
         -ms-overflow-style: none !important;
@@ -1003,7 +997,7 @@
         display: none !important;
     }
 
-    /* 6. Control de saltos de página y prevención de cortes de bloques */
+    /* 5. Saltos de página y prevención de cortes huérfanos */
     .pdf-page-break {
         display: block !important;
         height: 0 !important;
@@ -1018,15 +1012,22 @@
         display: none !important;
     }
 
-    table, 
-    tr, 
-    pre, 
-    blockquote, 
-    .katex-display-wrapper, 
-    .katex-display, 
-    img {
+    table, tr, pre, blockquote, .katex-display-wrapper, .katex-display, img {
         break-inside: avoid !important;
         page-break-inside: avoid !important;
+    }
+
+    .mermaid-diagram-wrapper {
+    width: 100%;
+    margin: 1.5rem auto;
+    text-align: center;
+    overflow-x: auto;
+    }
+
+    .mermaid-diagram-wrapper svg {
+    display: inline-block;
+    max-width: 100% !important;
+    height: auto !important;
     }
 
     h1, h2, h3, h4, h5, h6 {

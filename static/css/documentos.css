@@ -138,6 +138,11 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     font-size: 1rem;
     line-height: 1.7;
+    /* Ajuste de palabra para evitar desbordes */
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
+    word-break: break-word;
+    white-space: normal;
 }
 
 .empty-render-msg {
@@ -156,6 +161,8 @@
     padding-bottom: 0.35rem;
     margin-top: 1.4rem;
     margin-bottom: 0.8rem;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .doc-rendered-sheet h1 { font-size: 1.8rem; }
@@ -164,6 +171,8 @@
 
 .doc-rendered-sheet p {
     margin: 0.75rem 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .doc-rendered-sheet hr {
@@ -178,6 +187,7 @@
     border-collapse: collapse;
     width: 100%;
     margin: 1.2rem 0;
+    word-break: break-word;
 }
 
 .doc-rendered-sheet th, 
@@ -186,6 +196,8 @@
     padding: 0.55rem 0.85rem;
     font-size: 0.92rem;
     text-align: left;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .doc-rendered-sheet th {
@@ -210,6 +222,8 @@
     overflow-x: auto;
     font-family: monospace;
     font-size: 0.88rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .doc-rendered-sheet code {
@@ -217,6 +231,7 @@
     padding: 0.15rem 0.35rem;
     border-radius: 4px;
     font-size: 0.88em;
+    overflow-wrap: anywhere;
 }
 
 /* Fórmulas matemáticas KaTeX */
@@ -226,74 +241,6 @@
     overflow-y: hidden;
 }
 
-/* =========================================
-   REGLAS PARA EXPORTACIÓN A PDF (@media print)
-   ========================================= */
-@media print {
-    /* Ocultar elementos de la interfaz web */
-    .app-header,
-    .app-footer,
-    .no-print,
-    .editor-panel {
-        display: none !important;
-    }
-
-    body, html, .app-layout, .main-content, .docs-container {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        width: 100% !important;
-    }
-
-    .docs-workspace {
-        display: block !important;
-        height: auto !important;
-    }
-
-    .preview-panel {
-        border: none !important;
-        background: transparent !important;
-    }
-
-    .doc-rendered-sheet {
-        padding: 0 !important;
-        overflow: visible !important;
-        color: #000000 !important;
-    }
-
-    @page {
-        margin: 2cm 1.5cm;
-        size: A4;
-    }
-}
-
-/* Responsive para pantallas pequeñas */
-@media (max-width: 850px) {
-    .docs-workspace {
-        grid-template-columns: 1fr;
-        height: auto;
-    }
-    .doc-textarea {
-        min-height: 280px;
-    }
-}
-
-/* Estilo formal para citas tipo bloque (Blockquotes) */
-.doc-rendered-sheet blockquote {
-    margin: 1rem 0;
-    padding: 0.6rem 1.2rem;
-    color: #4b5563;
-    background-color: #f8fafc;
-    border-left: 4px solid #3b82f6;
-    border-radius: 0 6px 6px 0;
-}
-
-.doc-rendered-sheet blockquote p {
-    margin: 0.35rem 0;
-}
-
-/* Contenedor de fórmulas en bloque KaTeX */
 .katex-display-wrapper {
     margin: 1.2rem 0;
     text-align: center;
@@ -305,13 +252,27 @@
     margin: 0 !important;
 }
 
+/* Estilo formal para citas tipo bloque */
+.doc-rendered-sheet blockquote {
+    margin: 1rem 0;
+    padding: 0.6rem 1.2rem;
+    color: #4b5563;
+    background-color: #f8fafc;
+    border-left: 4px solid #3b82f6;
+    border-radius: 0 6px 6px 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
 
+.doc-rendered-sheet blockquote p {
+    margin: 0.35rem 0;
+}
 
-
-
-/* Blindaje contra resets globales de base.css que puedan pisar el estilo semántico */
+/* Blindaje semántico */
 .doc-rendered-sheet li {
     font-weight: 400;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .doc-rendered-sheet strong,
@@ -329,11 +290,7 @@
     font-style: italic !important;
 }
 
-/* =========================================
-   SALTO DE PÁGINA VISUAL Y ANTICORTES PDF
-   ========================================= */
-
-/* Indicador visual de salto forzado en la pantalla */
+/* Salto de página visual en pantalla */
 .pdf-page-break {
     display: flex;
     align-items: center;
@@ -355,52 +312,12 @@
     user-select: none;
 }
 
-/* Efecto destello al saltar del editor a la vista previa */
+/* Efecto destello de sincronización */
 .sync-flash {
     outline: 2px solid #3b82f6;
     background-color: rgba(59, 130, 246, 0.12) !important;
     border-radius: 4px;
     transition: background-color 0.8s ease, outline 0.8s ease;
-}
-
-/* =========================================
-   REGLAS DE IMPRESIÓN ESTRICTAS (@media print)
-   ========================================= */
-@media print {
-    /* 1. Prohibir cortes a la mitad en bloques críticos */
-    table, 
-    tr, 
-    pre, 
-    blockquote, 
-    .katex-display-wrapper, 
-    .katex-display, 
-    img, 
-    .footnotes, 
-    section[data-footnotes] {
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-    }
-
-    /* 2. Evitar títulos huérfanos al final de una página */
-    h1, h2, h3, h4, h5, h6 {
-        break-after: avoid !important;
-        page-break-after: avoid !important;
-    }
-
-    /* 3. Ejecutar salto de página real para el PDF */
-    .pdf-page-break {
-        display: block !important;
-        height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: none !important;
-        break-before: page !important;
-        page-break-before: always !important;
-    }
-
-    .page-break-label {
-        display: none !important;
-    }
 }
 
 /* =========================================
@@ -453,7 +370,6 @@
     background-color: #2ea043;
 }
 
-/* Barra de controles */
 .hub-control-bar {
     background-color: #161b22;
     border: 1px solid #30363d;
@@ -515,7 +431,6 @@
     font-weight: 500;
 }
 
-/* Grilla de Tarjetas */
 .docs-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -526,7 +441,8 @@
     background-color: #161b22;
     border: 1px solid #30363d;
     border-radius: 8px;
-    padding: 1.15rem;
+    min-height: 140px;
+    padding: 1.25rem 1.4rem;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -547,11 +463,10 @@
 }
 
 .card-title {
-    color: #e6edf3;
-    font-size: 1.05rem;
-    margin: 0;
-    font-weight: 600;
-    line-height: 1.35;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #ffffff;
+    line-height: 1.4;
     word-break: break-word;
 }
 
@@ -570,13 +485,12 @@
     word-break: break-word;
 }
 
-/* Badges temáticos */
 .card-badges {
     display: flex;
     gap: 0.4rem;
     align-items: center;
     flex-wrap: wrap;
-    margin-bottom: 1rem;
+    margin: 0.6rem 0 1.2rem 0;
 }
 
 .tag-badge {
@@ -591,7 +505,6 @@
 .tag-break { background-color: rgba(210, 153, 34, 0.15); color: #d29922; }
 .tag-words { color: #6e7681; font-size: 0.75rem; margin-left: auto; }
 
-/* Botonera de Tarjeta */
 .card-footer {
     display: flex;
     justify-content: space-between;
@@ -616,6 +529,22 @@
     background-color: #30363d;
     border-color: #58a6ff;
     color: #ffffff;
+}
+
+.btn-preview {
+    background-color: #1f6feb;
+    border: 1px solid #388bfd;
+    color: #ffffff;
+    padding: 0.35rem 0.85rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-preview:hover {
+    background-color: #388bfd;
 }
 
 .card-actions-right {
@@ -659,7 +588,6 @@
 .empty-icon { font-size: 3rem; margin-bottom: 0.5rem; }
 .mt-3 { margin-top: 1rem; }
 
-
 /* Botón Volver y campo de título */
 .btn-doc-back {
     background-color: #21262d;
@@ -695,7 +623,6 @@
     border-color: #58a6ff;
 }
 
-/* Indicador de estado de guardado */
 .save-status-badge {
     font-size: 0.78rem;
     font-weight: 600;
@@ -710,7 +637,6 @@
 .status-saving { color: #58a6ff; }
 .status-error { color: #f85149; }
 
-/* Botón Guardar */
 .btn-doc-save {
     background-color: #238636;
     border: 1px solid #2ea043;
@@ -725,40 +651,6 @@
 
 .btn-doc-save:hover {
     background-color: #2ea043;
-}
-
-
-/* Priorización del título y limpieza de tarjeta */
-.doc-card {
-    min-height: 140px;
-    padding: 1.25rem 1.4rem;
-}
-
-.card-title {
-    font-size: 1.15rem;
-    font-weight: 700;
-    color: #ffffff;
-    line-height: 1.4;
-}
-
-.card-badges {
-    margin: 0.6rem 0 1.2rem 0;
-}
-
-.btn-preview {
-    background-color: #1f6feb;
-    border: 1px solid #388bfd;
-    color: #ffffff;
-    padding: 0.35rem 0.85rem;
-    border-radius: 6px;
-    font-size: 0.82rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.btn-preview:hover {
-    background-color: #388bfd;
 }
 
 /* =========================================
@@ -855,7 +747,6 @@
     justify-content: center;
 }
 
-/* En el modal, la hoja se comporta igual que la vista previa */
 .doc-modal-body .doc-rendered-sheet {
     width: 100%;
     max-width: 820px;
@@ -866,13 +757,12 @@
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 
-/* Indicador visual al arrastrar imagen sobre el textarea */
+/* Modal e inserción de imágenes */
 .textarea-dragover {
     border: 2px dashed #58a6ff !important;
     background-color: rgba(56, 139, 253, 0.05) !important;
 }
 
-/* Modal de Galería de Imágenes */
 .modal-gallery-container {
     max-width: 820px;
     width: 90%;
@@ -986,4 +876,161 @@
     background-color: rgba(248, 81, 73, 0.15);
     border-color: rgba(248, 81, 73, 0.4);
     color: #f85149;
+}
+
+/* Pantallas pequeñas */
+@media (max-width: 850px) {
+    .docs-workspace {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+    .doc-textarea {
+        min-height: 280px;
+    }
+}
+
+/* =========================================================
+   REGLAS DE IMPRESIÓN Y EXPORTACIÓN A PDF A4 (@media print)
+   ========================================================= */
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 18mm 15mm 18mm 15mm;
+    }
+
+    /* 1. Ocultar interfaz del sistema, menús y botones */
+    .app-header,
+    .app-footer,
+    .docs-toolbar,
+    .panel-header,
+    .doc-modal-header,
+    .docs-hub-container,
+    .hub-header,
+    .hub-control-bar,
+    .docs-grid,
+    .modal-gallery-container,
+    .editor-panel,
+    .no-print,
+    .btn,
+    button {
+        display: none !important;
+    }
+
+    /* 2. Reset estructural de la página */
+    html, body, .app-layout, .main-content, .docs-container {
+        background: #ffffff !important;
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+    }
+
+    /* 3. Desmontar el modal y desplegarlo como documento plano continuo */
+    .doc-modal-overlay {
+        position: static !important;
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        background: transparent !important;
+        backdrop-filter: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        z-index: auto !important;
+    }
+
+    .doc-modal-container {
+        position: static !important;
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        background: transparent !important;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .doc-modal-body {
+        position: static !important;
+        display: block !important;
+        background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: visible !important;
+    }
+
+    .doc-workspace {
+        display: block !important;
+        height: auto !important;
+    }
+
+    .docs-panel,
+    .preview-panel {
+        border: none !important;
+        background: transparent !important;
+        display: block !important;
+    }
+
+    /* 4. Hoja renderizada a tamaño completo sin marcos ni sombras */
+    .doc-rendered-sheet,
+    .doc-modal-body .doc-rendered-sheet {
+        width: 100% !important;
+        max-width: 100% !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+        font-size: 11pt !important;
+        line-height: 1.5 !important;
+    }
+
+    /* 5. Supresión total de scrollbars */
+    * {
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
+    }
+    ::-webkit-scrollbar {
+        display: none !important;
+    }
+
+    /* 6. Control de saltos de página y prevención de cortes de bloques */
+    .pdf-page-break {
+        display: block !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        break-before: page !important;
+        page-break-before: always !important;
+    }
+
+    .page-break-label {
+        display: none !important;
+    }
+
+    table, 
+    tr, 
+    pre, 
+    blockquote, 
+    .katex-display-wrapper, 
+    .katex-display, 
+    img {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        break-after: avoid !important;
+        page-break-after: avoid !important;
+    }
 }

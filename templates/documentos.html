@@ -219,9 +219,9 @@
 
         // 2. Dólares literales escapados (\$)
         texto = texto.replace(/\\\$/g, () => {
-            const key = `${DOLLAR_PREFIX}${dollarIndex++}@@`;
-            escapedDollars.push({ key, val: "$" });
-            return key;
+        const key = `${DOLLAR_PREFIX}${dollarIndex++}@@`;
+        escapedDollars.push({ key, val: "$" });
+        return key;
         });
 
         // 3. Salto de página manual para PDF
@@ -258,11 +258,11 @@
             return key;
         });
 
-        // 5.5 Formateo extendido
+        // 5.5 Formateo extendido, A. Aislar tachado GFM (~~...~~)
         texto = texto.replace(/~~([^\s~](?:[\s\S]*?[^\s~])?)~~/g, (match, contenido) => {
-            const key = `${STRIKE_PREFIX}${strikeIndex++}@@`;
-            strikethroughTokens.push({ key, val: `<del>${contenido}</del>` });
-            return key;
+        const key = `${STRIKE_PREFIX}${strikeIndex++}@@`;
+        strikethroughTokens.push({ key, val: `<del>${contenido}</del>` });
+        return key;
         });
 
         texto = texto.replace(/(?<!=)==([^\s=](?:[^=\n]*?[^\s=])?)==(?!=)/g, '<mark>$1</mark>');

@@ -57,7 +57,7 @@ RUTA_ENV = ".env"
 RUTA_ULTIMO_BACKUP = "ultimo_backup.txt"
 
 # Clasificación de categorías que usan la vista extendida de novela/borrador
-CATEGORIAS_TEXTO_LARGO = ("Novelas", "Borrador", "Resumen")
+CATEGORIAS_TEXTO_LARGO = ("Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano", "Novelas")
 
 # Directorio de almacenamiento para imágenes asociadas a documentos Markdown
 CARPETA_IMAGENES_DOCS = os.path.join("static", "uploads", "documentos")
@@ -80,14 +80,58 @@ CABECERAS_MAGICAS = {
 
 
 # ==============================================================================
-# SECCIÓN 1: UTILIDADES DE SISTEMA, AUDITORÍA Y SEGURIDAD
+# SECCIÓN 1: UTILIDADES DE SISTEMA, AUDITORÍA Y REGISTRO EN TERMINAL
 # ==============================================================================
 
-def registrar_log(accion):
-    """Escribe un mensaje en la consola del servidor con marca temporal si LOG_MODE está activo."""
-    if os.environ.get("LOG_MODE", "true").lower() == "true":
-        hora = datetime.now().strftime("%H:%M:%S")
-        print(f"[{hora} LOG] {accion}")
+# Paleta ANSI de alta visibilidad para terminales modernas (Dark Theme)
+CLR_RESET   = "\033[0m"
+CLR_GRIS    = "\033[90m"
+CLR_AZUL    = "\033[94m"
+CLR_CYAN    = "\033[96m"
+CLR_VERDE   = "\033[92m"
+CLR_AMARILLO= "\033[93m"
+CLR_ROJO    = "\033[91m"
+CLR_MAGENTA = "\033[95m"
+CLR_BOLD    = "\033[1m"
+
+def registrar_log(accion, tipo=None):
+    """
+    Imprime eventos en consola con formato enriquecido, marcas temporales 
+    e insignias coloreadas según la criticidad del evento.
+    """
+    if os.environ.get("LOG_MODE", "true").lower() != "true":
+        return
+
+    hora = datetime.now().strftime("%H:%M:%S")
+    accion_lower = accion.lower()
+
+    # 1. Alertas y Errores Críticos
+    if tipo == "ERROR" or any(k in accion_lower for k in ["error", "fallid", "rechazad", "peligro", "no autorizada"]):
+        badge = f"{CLR_BOLD}{CLR_ROJO}✖ [PCM :: ALERTA]{CLR_RESET}"
+        texto_formateado = f"{CLR_ROJO}{accion}{CLR_RESET}"
+
+    # 2. Creación, Guardado y Actualización (Se evalúa primero para capturar notas y borradores)
+    elif tipo == "SUCCESS" or any(k in accion_lower for k in ["éxito", "exitos", "cread", "guardad", "actualizad", "iniciad"]):
+        badge = f"{CLR_BOLD}{CLR_VERDE}✔ [PCM :: ÉXITO]{CLR_RESET}"
+        texto_formateado = f"{CLR_VERDE}{accion}{CLR_RESET}"
+
+    # 3. Eliminaciones (Usa estrictamente la raíz 'elimin' para no colisionar con 'Borrador')
+    elif tipo == "DELETE" or any(k in accion_lower for k in ["elimin", "purgada", "vaciado total"]):
+        badge = f"{CLR_BOLD}{CLR_MAGENTA}🗑 [PCM :: DELETE]{CLR_RESET}"
+        texto_formateado = f"{CLR_MAGENTA}{accion}{CLR_RESET}"
+
+    # 4. Operaciones de Sistema, Llaves y Sesiones
+    elif tipo == "SYS" or any(k in accion_lower for k in ["desbloque", "bloque", "sesión", "rotad", "crític"]):
+        badge = f"{CLR_BOLD}{CLR_AMARILLO}⚡ [PCM :: SYS]{CLR_RESET}"
+        texto_formateado = f"{CLR_AMARILLO}{accion}{CLR_RESET}"
+
+    # 5. Información general
+    else:
+        badge = f"{CLR_BOLD}{CLR_CYAN}ℹ [PCM :: INFO]{CLR_RESET}"
+        texto_formateado = f"{CLR_CYAN}{accion}{CLR_RESET}"
+
+    # Salida por consola formateada
+    print(f"{CLR_GRIS}[{hora}]{CLR_RESET} {badge} {texto_formateado}") 
 
 
 def esta_desbloqueado():
@@ -382,11 +426,13 @@ def eliminar(clip_id):
 @clips_bp.route("/notas")
 @login_requerido
 def biblioteca_novelas():
-    """Muestra el catálogo de textos extensos (Borradores, Novelas, Resúmenes)."""
+    """Muestra el catálogo de textos extensos (5 categorías)."""
     conn = database.obtener_conexion()
-    resumenes = conn.execute(
-        "SELECT * FROM clips WHERE categoria IN ('Novelas', 'Borrador', 'Resumen') ORDER BY id DESC"
-    ).fetchall()
+    resumenes = conn.execute("""
+        SELECT * FROM clips 
+        WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Novelas') 
+        ORDER BY id DESC
+    """).fetchall()
     conn.close()
     return render_template("notas.html", resumenes=resumenes)
 
@@ -411,7 +457,9 @@ def guardar_resumen():
     clip_id = request.form.get("clip_id")
     titulo = request.form.get("titulo", "").strip() or "Texto sin título"
     tipo_doc = request.form.get("tipo_doc", "Borrador").strip()
-    if tipo_doc not in ["Borrador", "Resumen"]:
+    # Permitir las 5 categorías válidas
+    categorias_permitidas = ["Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano"]
+    if tipo_doc not in categorias_permitidas:
         tipo_doc = "Borrador"
 
     contenido = request.form.get("contenido", "").strip()
@@ -427,14 +475,14 @@ def guardar_resumen():
             SET titulo = ?, contenido = ?, categoria = ? 
             WHERE id = ?
         """, (titulo, contenido, tipo_doc, clip_id))
-        registrar_log(f"{tipo_doc} actualizado: '{titulo}'")
+        registrar_log(f"Nota actualizada [{tipo_doc}]: '{titulo}'")
     else:
         clip_uuid = str(uuid.uuid4())[:8]
         conn.execute("""
             INSERT INTO clips (uuid, titulo, contenido, categoria, fecha_creacion, expira_en, vistas_restantes)
             VALUES (?, ?, ?, ?, ?, NULL, -1)
         """, (clip_uuid, titulo, contenido, tipo_doc, ahora))
-        registrar_log(f"Nuevo {tipo_doc} creado: '{titulo}'")
+        registrar_log(f"Nueva nota guardada [{tipo_doc}]: '{titulo}'")
 
     conn.commit()
     conn.close()
@@ -528,6 +576,7 @@ def editar_codigo(clip_id):
 @login_requerido
 def fusionador():
     """Herramienta para concatenar prompts y formatear textos combinados."""
+    registrar_log("Herramienta Fusionador de textos abierta")
     return render_template("fusionador.html")
 
 
@@ -578,10 +627,6 @@ def documentos_editar(doc_id):
 @clips_bp.route("/documentos/api/guardar", methods=["POST"])
 @login_requerido
 def api_guardar_documento():
-    """
-    Endpoint silencioso (AJAX/Fetch): Guarda o actualiza documentos con
-    prevención de condiciones de carrera mediante el identificador devuelto.
-    """
     data = request.get_json() or {}
     doc_id = data.get("id")
     titulo = (data.get("titulo") or "").strip() or "Documento sin título"
@@ -597,15 +642,20 @@ def api_guardar_documento():
             WHERE id = ?
         """, (titulo, contenido, doc_id))
         nuevo_id = doc_id
+        accion_desc = f"Documento actualizado: '{titulo}' (ID: {nuevo_id})"
     else:
         cursor.execute("""
             INSERT INTO documentos (titulo, contenido) 
             VALUES (?, ?)
         """, (titulo, contenido))
         nuevo_id = cursor.lastrowid
+        accion_desc = f"Nuevo documento creado: '{titulo}' (ID: {nuevo_id})"
 
     conn.commit()
     conn.close()
+
+    # ---> REGISTRO EN CONSOLA:
+    registrar_log(accion_desc)
 
     return jsonify({"ok": True, "id": nuevo_id, "titulo": titulo})
 
@@ -616,9 +666,18 @@ def eliminar_documento(doc_id):
     """Elimina permanentemente un documento de la tabla 'documentos'."""
     conn = database.obtener_conexion()
     cursor = conn.cursor()
+
+    # Obtener el título antes de borrarlo para registrarlo en el log
+    cursor.execute("SELECT titulo FROM documentos WHERE id = ?", (doc_id,))
+    doc = cursor.fetchone()
+    titulo_doc = doc["titulo"] if doc else f"ID #{doc_id}"
+
     cursor.execute("DELETE FROM documentos WHERE id = ?", (doc_id,))
     conn.commit()
     conn.close()
+
+    # ---> REGISTRO EN CONSOLA:
+    registrar_log(f"Documento eliminado: '{titulo_doc}'")
 
     flash("Documento eliminado correctamente.", "info")
     return redirect(url_for("clips.documentos"))
@@ -768,6 +827,7 @@ def configuracion():
             set_key(RUTA_ENV, "HOST", nuevo_host)
             os.environ["HOST"] = nuevo_host
 
+    # --- Parámetros de red y entorno ---
         nuevo_port = request.form.get("port", "").strip()
         if nuevo_port:
             set_key(RUTA_ENV, "PORT", nuevo_port)
@@ -776,6 +836,13 @@ def configuracion():
         log_mode = "true" if "log_mode" in request.form else "false"
         set_key(RUTA_ENV, "LOG_MODE", log_mode)
         os.environ["LOG_MODE"] = log_mode
+
+        auto_abrir = "true" if "auto_abrir_navegador" in request.form else "false"
+        set_key(RUTA_ENV, "AUTO_ABRIR_NAVEGADOR", auto_abrir)
+        os.environ["AUTO_ABRIR_NAVEGADOR"] = auto_abrir
+
+        # ---> REGISTRO GENERAL DE AJUSTES:
+        registrar_log("Ajustes del servidor y variables .env actualizadas")
 
         return redirect(url_for("clips.configuracion", guardado=1))
 

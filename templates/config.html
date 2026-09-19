@@ -130,7 +130,16 @@
                         </option>
                     </select>
                 </div>
-
+                
+                <!-- AUTO ABRIR NAVEGADOR -->
+                <div class="checkbox-item">
+                    <label>
+                        <input type="checkbox" name="auto_abrir_navegador" 
+                               {% if valores.get('AUTO_ABRIR_NAVEGADOR', 'false')|lower == 'true' %}checked{% endif %}>
+                        Abrir pestaña del navegador automáticamente al iniciar (solo aplica al ejecutable .exe)
+                    </label>
+                </div>
+                <!-- LOG MODE -->
                 <div class="checkbox-item">
                     <label>
                         <input type="checkbox" name="log_mode" {% if valores.get('LOG_MODE', 'false')|lower == 'true' %}checked{% endif %}>

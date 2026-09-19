@@ -54,18 +54,26 @@
 
     <!-- Espacio de trabajo dividido (Split View) -->
     <div class="docs-workspace">
-        <!-- Panel 1: Editor Markdown crudo -->
+
+        <!-- Panel 2: Editor Markdown crudo con regla de líneas -->
         <section class="docs-panel editor-panel no-print">
             <div class="panel-header">
                 <span>✏️ Editor Markdown, LaTeX & Diagramas</span>
                 <span id="docStats" class="panel-stats">0 palabras · 0 caracteres</span>
             </div>
-            <textarea id="docInput" class="doc-textarea" 
-                      placeholder="Pega aquí texto, fórmulas ($...$), tablas, diagramas (```mermaid) o imágenes con Ctrl + V..." 
-                      spellcheck="false" autofocus>{{ doc['contenido'] if doc else '' }}</textarea>
+            
+            <div class="editor-workspace-inner">
+                <!-- Canaleta de numeración -->
+                <div id="docLineNumbers" class="doc-line-numbers">1</div>
+
+                <!-- Área de texto principal -->
+                <textarea id="docInput" class="doc-textarea" 
+                          placeholder="Pega aquí texto, fórmulas ($...$), tablas, diagramas (```mermaid) o imágenes con Ctrl + V..." 
+                          spellcheck="false" autofocus>{{ doc['contenido'] if doc else '' }}</textarea>
+            </div>
         </section>
 
-        <!-- Panel 2: Vista previa renderizada en tiempo real -->
+        <!-- Panel 3: Vista previa renderizada en tiempo real -->
         <section class="docs-panel preview-panel">
             <div class="panel-header no-print">
                 <span>👁️ Vista Previa Renderizada</span>
@@ -162,7 +170,7 @@
 <script>
 /**
  * ==============================================================================
- * PCM PRIVATE CLIP MANAGER - NÚCLEO DE EDICIÓN Y RENDERIZADO V3
+ * PCM PRIVATE CLIP MANAGER - NÚCLEO DE EDICIÓN Y RENDERIZADO V4
  * ==============================================================================
  * Este script gestiona el ciclo de vida completo del editor técnico:
  * 1. Aislamiento por Token Shield (evita colisiones regex con código o LaTeX).
@@ -195,6 +203,9 @@ const URL_LISTAR_IMG = docsContainer.getAttribute("data-url-imagenes");
 // Identificador del documento en SQLite (null = documento nuevo sin persistir)
 const docIdInput = document.getElementById("docId");
 let currentDocId = docIdInput && docIdInput.value ? parseInt(docIdInput.value, 10) : null;
+
+// Referencia a la canaleta de numeración de líneas
+const docLineNumbers = document.getElementById("docLineNumbers");
 
 /* ==============================================================================
    SECCIÓN 2: CONTROL DE ESTADO, VERSIONES Y MUTEX ASÍNCRONO
@@ -424,7 +435,6 @@ function renderizarDocumento() {
     if (window.mermaid && mermaidTokens.length > 0) {
         try {
             const nodos = output.querySelectorAll('.mermaid');
-            // Limpiar marca previa para obligar a Mermaid a re-renderizar cambios en vivo
             nodos.forEach(el => el.removeAttribute('data-processed'));
 
             if (typeof mermaid.run === "function") {
@@ -443,6 +453,7 @@ function renderizarDocumento() {
     const palabras = rawText.trim() === "" ? 0 : rawText.trim().split(/\s+/).length;
     actualizarMetricas(palabras, rawText.length);
 }
+
 
 /* ==============================================================================
    SECCIÓN 5: MÉTRICAS EN VIVO Y CONTROL DE ENTRADA (DEBOUNCE)
@@ -472,6 +483,26 @@ input.addEventListener("input", () => {
 });
 
 tituloInput.addEventListener("input", marcarModificado);
+
+/**
+ * Genera la secuencia numérica 1..N según los saltos de línea (\n)
+ */
+function actualizarNumerosLinea() {
+    if (!docLineNumbers) return;
+    const totalLineas = input.value.split("\n").length;
+    let acumulador = "";
+    for (let i = 1; i <= totalLineas; i++) {
+        acumulador += i + "\n";
+    }
+    docLineNumbers.textContent = acumulador;
+}
+
+// Sincronización de scroll vertical entre el textarea y la canaleta
+input.addEventListener("scroll", () => {
+    if (docLineNumbers) {
+        docLineNumbers.scrollTop = input.scrollTop;
+    }
+});
 
 /* ==============================================================================
    SECCIÓN 6: PERSISTENCIA Y GUARDADO ASÍNCRONO EN SQLITE
@@ -837,29 +868,709 @@ function limpiarEditor() {
    ============================================================================== */
 const MODULOS_PRUEBAS = {
     math: {
-        prompt: `Genera un documento técnico en Markdown compatible con KaTeX.
-Requisitos:
-1. Bloques de fórmulas usando exclusivamente delimitadores $$ o entornos (\\begin{aligned}, \\begin{pmatrix}).
-2. Fórmulas inline delimitadas por un signo de dólar ($...$) sin espacios al borde.
-3. Incluye límites (\\lim), derivadas, integrales impropias (\\int_{a}^{b}) y un sistema matricial.`,
-        markdown: `### Cálculo Diferencial e Integral\n\n$$\n\\lim_{x \\to 0} \\left( \\frac{\\sin x}{x} \\right) = 1 \\quad \\text{y} \\quad \\int_{0}^{\\infty} x^2 e^{-x} \\, dx = 2\n$$\n\n### Álgebra Matricial\n\n$$\nA = \\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}\n$$`
+        prompt: `Genera un documento técnico en Markdown optimizado para KaTeX.
+Requisitos estrictos:
+1. Delimita fórmulas en bloque únicamente con $$ en líneas independientes o entornos estándar (\\begin{aligned}, \\begin{pmatrix}, \\begin{cases}).
+2. Delimita fórmulas en línea con un solo signo de dólar ($...$) sin espacios internos al inicio o final.
+3. Incluye: matrices con elipses (\\cdots, \\vdots, \\ddots), límites, integrales múltiples, polinomios de grado n, raíces con orden (\\sqrt[n]{}), series de Taylor y notación tensorial.
+4. No utilices paquetes de LaTeX no soportados por navegadores como TikZ o tabular.`,
+        markdown: `# Batería Integral de Pruebas: Motor Matemático KaTeX
+
+Documento de validación y estrés tipográfico para evaluar la precisión del renderizado algebraico, vectorial y de cálculo infinitesimal en KaTeX dentro de PCM.
+
+---
+> ⚠️ **Restricciones y Limitaciones del Motor KaTeX en este Entorno:**
+> * **Delimitación estricta:** Las fórmulas en bloque deben encerrarse en \`$$\` en líneas independientes. Las fórmulas en línea (\`$...$\`) no deben tener espacios pegados al dólar (\`$x$\`, no \`$x$\`).
+> * **Entornos multilínea:** Usar siempre \`\\begin{aligned} ... \\end{aligned}\` dentro de \`$$\`. El entorno nativo \`align*\` requiere configuración extra de LaTeX.
+> * **Macros no soportadas:** Paquetes pesados (\`tikz\`, \`tabular\`) no son soportados por motores web de KaTeX.
+> * **Ruptura de página en PDF:** KaTeX genera contenedores atómicos que no se fraccionan automáticamente; ecuaciones muy largas deben separarse en bloques \`$$\` distintos.
+---
+
+### 1. Matrices Especiales, Guías de Puntos y Determinantes
+
+Matriz cuadrada de orden $n$ con elipses de trayectoria:
+
+$$
+A_{n \\times n} = \\begin{pmatrix}
+a_{11} & a_{12} & \\cdots & a_{1n} \\\\
+a_{21} & a_{22} & \\cdots & a_{2n} \\\\
+\\vdots & \\vdots & \\ddots & \\vdots \\\\
+a_{n1} & a_{n2} & \\cdots & a_{nn}
+\\end{pmatrix}
+$$
+
+Matriz identidad entre corchetes (\`bmatrix\`) y determinante (\`vmatrix\`):
+
+$$
+I_4 = \\begin{bmatrix}
+1 & 0 & 0 & 0 \\\\
+0 & 1 & 0 & 0 \\\\
+0 & 0 & 1 & 0 \\\\
+0 & 0 & 0 & 1
+\\end{bmatrix}, \\quad
+\\det(M) = \\begin{vmatrix}
+\\lambda - a & -b \\\\
+-c & \\lambda - d
+\\end{vmatrix} = (\\lambda - a)(\\lambda - d) - bc
+$$
+
+---
+
+### 2. Cálculo Diferencial y Límites
+
+Límites indeterminados y al infinito:
+
+$$
+\\lim_{x \\to 0} \\frac{\\sin(ax)}{bx} = \\frac{a}{b}, \\qquad \\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n = e, \\qquad \\lim_{x \\to 0^+} x \\ln(x) = 0
+$$
+
+Derivadas de orden superior y ecuaciones diferenciales parciales:
+
+$$
+\\frac{d^n}{dx^n} [e^{kx}] = k^n e^{kx}, \\qquad \\frac{\\partial^2 u}{\\partial t^2} = c^2 \\left( \\frac{\\partial^2 u}{\\partial x^2} + \\frac{\\partial^2 u}{\\partial y^2} + \\frac{\\partial^2 u}{\\partial z^2} \\right)
+$$
+
+Operadores vectoriales:
+
+$$
+\\nabla f(x,y,z) = \\left( \\frac{\\partial f}{\\partial x}, \\frac{\\partial f}{\\partial y}, \\frac{\\partial f}{\\partial z} \\right), \\qquad \\nabla \\times \\mathbf{E} = -\\frac{\\partial \\mathbf{B}}{\\partial t}
+$$
+
+---
+
+### 3. Cálculo Integral (Simples, Múltiples y de Contorno)
+
+Integrales definidas e impropias:
+
+$$
+\\int_{0}^{\\infty} e^{-x^2} \\, dx = \\frac{\\sqrt{\\pi}}{2}, \\qquad \\int_{-\\infty}^{\\infty} \\frac{1}{1 + x^2} \\, dx = \\pi
+$$
+
+Integrales dobles y teorema de Stokes:
+
+$$
+\\iint_{\\Omega} (x^2 + y^2) \\, dx \\, dy = \\int_{0}^{2\\pi} \\int_{0}^{R} r^3 \\, dr \\, d\\theta = \\frac{\\pi R^4}{2}
+$$
+
+$$
+\\oint_{\\mathcal{C}} \\mathbf{F} \\cdot d\\mathbf{r} = \\iint_{\\mathcal{S}} (\\nabla \\times \\mathbf{F}) \\cdot \\hat{\\mathbf{n}} \\, dS
+$$
+
+---
+
+### 4. Sistemas Multilínea y Derivaciones Paso a Paso (\`aligned\`)
+
+$$
+\\begin{aligned}
+\\mathcal{L}\\{f'(t)\\} &= \\int_{0}^{\\infty} e^{-st} f'(t) \\, dt \\\\
+&= \\left[ e^{-st} f(t) \\right]_{0}^{\\infty} - \\int_{0}^{\\infty} (-s e^{-st}) f(t) \\, dt \\\\
+&= 0 - f(0) + s \\int_{0}^{\\infty} e^{-st} f(t) \\, dt \\\\
+&= s F(s) - f(0)
+\\end{aligned}
+$$
+
+---
+
+### 5. Funciones a Trozos y Sistemas de Ecuaciones (\`cases\`)
+
+$$
+f(x) = \\begin{cases}
+0 & \\text{si } x < -\\pi \\\\
+\\frac{1}{2} \\cos(x) & \\text{si } -\\pi \\le x \\le \\pi \\\\
+e^{-(x - \\pi)} & \\text{si } x > \\pi
+\\end{cases}, \\qquad
+\\begin{cases}
+2x + 3y - z = 1 \\\\
+-x + 4y + 2z = 13 \\\\
+5x - y + 3z = 2
+\\end{cases}
+$$
+
+---
+
+### 6. Sumatorias, Productorias y Fracciones Continuas
+
+$$
+\\sum_{k=1}^{\\infty} \\frac{1}{k^2} = \\frac{\\pi^2}{6}, \\qquad \\prod_{k=2}^{n} \\left( 1 - \\frac{1}{k^2} \\right) = \\frac{n + 1}{2n}
+$$
+
+$$
+\\frac{1}{\\phi} = \\cfrac{1}{1 + \\cfrac{1}{1 + \\cfrac{1}{1 + \\cfrac{1}{1 + \\ddots}}}}
+$$
+
+---
+
+### 7. Probabilidad, Estadística y Combinatoria
+
+$$
+f(x \\mid \\mu, \\sigma^2) = \\frac{1}{\\sqrt{2\\pi\\sigma^2}} \\exp\\left( -\\frac{(x - \\mu)^2}{2\\sigma^2} \\right), \\qquad \\binom{n}{k} = \\frac{n!}{k!(n - k)!}
+$$
+
+$$
+\\mathbb{E}[X] = \\int_{-\\infty}^{\\infty} x f(x) \\, dx, \\qquad \\operatorname{Cov}(X, Y) = \\mathbb{E}[(X - \\mathbb{E}[X])(Y - \\mathbb{E}[Y])]
+$$
+
+---
+
+### 8. Lógica Formal, Conjuntos y Estructuras
+
+$$
+\\forall \\epsilon > 0, \\; \\exists \\delta > 0 \\;:\\; 0 < |x - c| < \\delta \\implies |f(x) - L| < \\epsilon
+$$
+
+$$
+\\mathbb{N} \\subset \\mathbb{Z} \\subset \\mathbb{Q} \\subset \\mathbb{R} \\subset \\mathbb{C}
+$$
+
+---
+
+### 9. Física Teórica y Operadores Cuánticos
+
+$$
+\\left( \\nabla^2 - \\frac{1}{c^2} \\frac{\\partial^2}{\\partial t^2} \\right) \\psi(\\mathbf{r}, t) = 0, \\qquad \\langle \\psi | \\hat{H} | \\psi \\rangle = \\int_{-\\infty}^{\\infty} \\psi^*(x) \\left( -\\frac{\\hbar^2}{2m} \\frac{d^2}{dx^2} + V(x) \\right) \\psi(x) \\, dx
+$$
+
+---
+
+### 10. Álgebra Polinomial, Índices Compuestos y Notación Tensorial
+
+Polinomio general de grado $n$ con coeficientes indexados:
+
+$$
+P_n(x) = a_n x^n + a_{n-1} x^{n-1} + \\dots + a_2 x^2 + a_1 x + a_0 = \\sum_{k=0}^{n} a_k x^k
+$$
+
+Teorema del binomio y raíces con índice radical:
+
+$$
+(x + y)^n = \\sum_{k=0}^{n} \\binom{n}{k} x^{n-k} y^k, \\qquad \\sqrt[n]{\\prod_{i=1}^{n} x_i} \\le \\frac{1}{n} \\sum_{i=1}^{n} x_i
+$$
+
+Fórmula cuadrática con subíndices múltiples y raíces cuadradas anidadas:
+
+$$
+x_{1,2} = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}, \\qquad R = \\sqrt{1 + \\sqrt{2 + \\sqrt{3 + \\dots}}}
+$$
+
+Índices simultáneos, anidados y notación tensorial:
+
+$$
+T^{\\mu\\nu}_{\\alpha\\beta} = g^{\\mu\\rho} g^{\\nu\\sigma} R_{\\rho\\sigma\\alpha\\beta}, \\qquad x_{i_j}^{k^2} + y_{n_{k-1}}^{(m+1)}
+$$
+
+Aproximación por serie de Taylor y método de Newton-Raphson:
+
+$$
+f(x) = \\sum_{k=0}^{\\infty} \\frac{f^{(k)}(x_0)}{k!} (x - x_0)^k, \\qquad x_{n+1} = x_n - \\frac{P(x_n)}{P'(x_n)}
+$$`
     },
-    mermaid: {
-        prompt: `Genera diagramas en Markdown usando Mermaid.js sin HTML incrustado.
-Requisitos:
-1. Diagrama de flujo 'graph TD' con decisiones, subgrafos y conexiones claras.
-2. Diagrama de secuencia 'sequenceDiagram' con participantes explícitos y autonumber.
-3. Bloques estrictos de triple comilla invertida con la palabra clave mermaid.`,
-        markdown: `\`\`\`mermaid\ngraph TD\n    A[Inicio] --> B{¿Requiere Auth?}\n    B -- Sí --> C[Iniciar Sesión]\n    B -- No --> D[Acceso Libre]\n    C --> E[Editor Markdown]\n    D --> E\n\`\`\``
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+mermaid: {
+        prompt: `Genera diagramas en Markdown usando exclusivamente Mermaid.js compatible con PCM.
+Restricciones de sintaxis:
+1. Para diagramas de capas jerárquicas (Frontend, Backend, DB), prioriza 'flowchart LR' o declara enlaces externos fuera de los subgrafos.
+2. No usar guiones medios (-) en IDs de nodo (usar guiones bajos o camelCase: nodo_1, no nodo-1).
+3. Todo texto de nodo con caracteres especiales o tildes debe ir entre comillas: A["¿Datos válidos?"].
+4. En diagramas de secuencia, usa autonumber y declara participantes explícitos arriba.`,
+        markdown: `# Batería Integral de Pruebas: Motor de Diagramación Mermaid.js
+
+Documento de validación técnica exhaustiva para evaluar todas las capacidades sintácticas y de renderizado vectorial soportadas por la biblioteca Mermaid.js dentro del entorno PCM.
+
+---
+> ⚠️ **Restricciones y Limitaciones del Motor Mermaid.js en este Entorno:**
+> * **Diagramas obsoletos:** \`requirementDiagram\` presenta cajas rígidas de ancho fijo que pueden truncar palabras según el navegador.
+> * **Regla de oro para capas (\`subgraph\`):** Las conexiones entre subgrafos deben declararse estrictamente fuera de los bloques \`end\` para evitar que las flechas corten títulos. Para diagramas de 3 o más capas jerárquicas, priorizar siempre \`flowchart LR\`.
+> * **Nombres de identificadores:** No utilizar guiones medios (\`-\`) dentro de identificadores de nodos (\`nodo-1\` rompe el parser; usar \`nodo_1\` o \`nodo1\`).
+> * **Aislamiento de etiquetas:** Todo texto de nodo con caracteres especiales (\`/\`, \`¿?\`, \`()\`) debe ir delimitado por comillas rectas (\`["Texto seguro"]\`).
+---
+
+### 1. Diagrama de Flujo con Subgrafos y Conectores Estilizados (\`flowchart\`)
+
+\`\`\`mermaid
+%%{init: {'flowchart': {'curve': 'basis', 'nodeSpacing': 50, 'rankSpacing': 60}}}%%
+flowchart TD
+    subgraph Cliente["Capa de Presentación (Navegador)"]
+        A([Inicio de Sesión]) --> B[/Ingresar Credenciales/]
+        B --> C{¿Datos válidos?}
+        C -->|No| B
+        C -->|Sí| D[[Preparar Token Shield]]
+    end
+
+    subgraph Servidor["Capa de Aplicación (Flask)"]
+        E[(Validar Mutex LAN)]
+        E --> F{¿Concurrencia activa?}
+        F -->|Sí| G[\\Encolar en espera\\]
+        F -->|No| H[Procesar Transacción]
+        H ==> K([Respuesta HTTP 200])
+        G --> E
+    end
+
+    subgraph Almacenamiento["Capa de Persistencia"]
+        I[(SQLite: pcm.db)]
+        I -.-> J[(Copia de Respaldo)]
+        J --- L[Auditoría Finalizada]
+    end
+
+    %% Conexiones limpias entre capas
+    D ====> E
+    H ====> I
+
+    style A fill:#238636,stroke:#2ea043,stroke-width:2px,color:#fff
+    style K fill:#1f6feb,stroke:#388bfd,stroke-width:2px,color:#fff
+    style C fill:#d29922,stroke:#bb8009,stroke-width:2px,color:#fff
+    style I fill:#8957e5,stroke:#a371f7,stroke-width:2px,color:#fff
+\`\`\`
+
+\`\`\`mermaid
+%%{init: {'flowchart': {'curve': 'basis', 'nodeSpacing': 35, 'rankSpacing': 45}}}%%
+flowchart LR
+    subgraph Cliente["Capa de Presentación"]
+        A([Inicio]) --> B[/Credenciales/]
+        B --> C{¿Válido?}
+        C -->|Sí| D[[Token Shield]]
+        C -->|No| B
+    end
+
+    subgraph Servidor["Capa de Servidor (Flask)"]
+        E[(Mutex LAN)] --> F{¿Ocupado?}
+        F -->|No| H[Procesar]
+        F -->|Sí| G[\\Encolar\\]
+        G --> E
+        H --> K([HTTP 200])
+    end
+
+    subgraph DB["Persistencia"]
+        I[(SQLite)] -.-> J[(Backup)]
+    end
+
+    D ==> E
+    H ==> I
+
+    style A fill:#238636,stroke:#2ea043,color:#fff
+    style K fill:#1f6feb,stroke:#388bfd,color:#fff
+    style I fill:#8957e5,stroke:#a371f7,color:#fff
+\`\`\`
+
+---
+
+### 2. Diagrama de Secuencia con Activaciones y Bloques Lógicos (\`sequenceDiagram\`)
+
+\`\`\`mermaid
+sequenceDiagram
+    autonumber
+    actor Usuario
+    participant UI as Editor PCM
+    participant Engine as Token Shield
+    participant API as Flask Endpoint
+    participant DB as Base de Datos
+
+    Usuario->>UI: Escribe contenido técnico
+    activate UI
+    UI->>Engine: Aislar bloques matemáticos y diagramas
+    activate Engine
+    Engine-->>UI: Retorna texto con nonces efímeros
+    deactivate Engine
+
+    Note over UI,API: Inicio de persistencia automática
+    UI->>API: POST /api/guardar_documento (Rev 12)
+    activate API
+    API->>DB: UPDATE documentos SET contenido...
+    activate DB
+    DB-->>API: Confirmación de escritura en disco
+    deactivate DB
+
+    alt Guardado exitoso
+        API-->>UI: HTTP 200 { ok: true, revision: 12 }
+        UI->>Usuario: Actualiza estado a 🟢 Listo
+    else Fallo de concurrencia o bloqueo
+        API-->>UI: HTTP 409 Conflict
+        UI->>Usuario: Muestra alerta 🟡 Sin guardar
+    end
+
+    deactivate API
+    deactivate UI
+\`\`\`
+
+---
+
+### 3. Diagrama de Clases y Relaciones Estructurales (\`classDiagram\`)
+
+\`\`\`mermaid
+classDiagram
+    class Documento {
+        +int id
+        +string titulo
+        +string contenido
+        +int revision
+        +guardar() bool
+        +renderizar() void
+    }
+
+    class TokenShield {
+        -string nonce
+        -list coleccionTokens
+        +generarNonce() string
+        +aislarBloques(string rawText) string
+        +restaurarTokens(string safeHtml) string
+    }
+
+    class GestorMultimedia {
+        +string rutaAlmacenamiento
+        +subirImagen(file binario) string
+        +eliminarImagen(string nombre) bool
+        +listarArchivos() list
+    }
+
+    class DOMPurifyEngine {
+        +list etiquetasPermitidas
+        +list atributosPermitidos
+        +sanitizar(string dirtyHtml) string
+    }
+
+    Documento "1" *-- "1" TokenShield : delega aislamiento
+    Documento "1" o-- "0..*" GestorMultimedia : administra
+    Documento ..> DOMPurifyEngine : ejecuta sanitización
+\`\`\`
+
+---
+
+### 4. Diagrama de Transición de Estados (\`stateDiagram-v2\`)
+
+\`\`\`mermaid
+stateDiagram-v2
+    [*] --> Inactivo
+
+    Inactivo --> Editando : Entrada de texto por teclado
+    Editando --> EnEsperaDebounce : Se detiene la escritura
+    EnEsperaDebounce --> Editando : Nueva pulsación detectada
+    EnEsperaDebounce --> Renderizando : Expira temporizador (70ms)
+
+    state Renderizando {
+        [*] --> ExtraccionTokens
+        ExtraccionTokens --> ParseoMarkdown
+        ParseoMarkdown --> SanitizacionDOM
+        SanitizacionDOM --> CompilacionKaTeX
+        CompilacionKaTeX --> GeneracionSVGMermaid
+        GeneracionSVGMermaid --> [*]
+    }
+
+    Renderizando --> Sincronizado : Buffer volcado al DOM
+    Sincronizado --> Editando : Modificación posterior
+    Sincronizado --> Persistiendo : Ctrl + S / Guardado automático
+
+    state Persistiendo {
+        [*] --> VerificacionMutex
+        VerificacionMutex --> PeticionHTTP
+        PeticionHTTP --> ConfirmacionDB
+        ConfirmacionDB --> [*]
+    }
+
+    Persistiendo --> Sincronizado : Transacción confirmada
+\`\`\`
+
+---
+
+### 5. Diagrama Entidad-Relación (\`erDiagram\`)
+
+\`\`\`mermaid
+erDiagram
+    USUARIO ||--o{ DOCUMENTO : redacta
+    DOCUMENTO ||--o{ IMAGEN_ADJUNTA : contiene
+    DOCUMENTO ||--o{ VERSION_HISTORICA : registra
+
+    USUARIO {
+        int id PK
+        string nombre_usuario
+        string password_hash
+        string rol
+        datetime ultimo_acceso
+    }
+
+    DOCUMENTO {
+        int id PK
+        int usuario_id FK
+        string titulo
+        text contenido_markdown
+        int version_actual
+        datetime actualizado_en
+    }
+
+    IMAGEN_ADJUNTA {
+        int id PK
+        int documento_id FK
+        string nombre_archivo
+        string ruta_sistema
+        int tamano_bytes
+        datetime subido_en
+    }
+
+    VERSION_HISTORICA {
+        int id PK
+        int documento_id FK
+        text instantanea_markdown
+        int numero_revision
+        datetime respaldado_en
+    }
+\`\`\`
+
+---
+
+### 6. Cronograma de Planificación y Tareas (\`gantt\`)
+
+\`\`\`mermaid
+gantt
+    title Plan de Desarrollo y Despliegue - Editor PCM V3
+    dateFormat  YYYY-MM-DD
+    axisFormat  %d/%m
+
+    section Fase 1: Arquitectura Base
+    Refactorización de persistencia SQLite :done, task1, 2026-09-01, 2026-09-05
+    Diseño de Token Shield con nonce dinámico :done, task2, 2026-09-06, 2026-09-10
+    Implementación de cerrojo asíncrono (Mutex) :done, task3, 2026-09-11, 2026-09-14
+
+    section Fase 2: Integración Visual
+    Compilación aislada de KaTeX :done, task4, 2026-09-15, 2026-09-17
+    Motor Mermaid con refresco data-processed :active, task5, 2026-09-18, 2026-09-20
+    Catálogo de pruebas y prompts en modal :task6, 2026-09-21, 2026-09-23
+
+    section Fase 3: Pruebas y Producción
+    Validación de exportación PDF A4 :crit, task7, 2026-09-24, 3d
+    Pruebas de latencia en red de área local :crit, task8, after task7, 2d
+\`\`\`
+
+---
+
+### 7. Distribución Proporcional de Componentes (\`pie\`)
+
+\`\`\`mermaid
+pie title Distribución de Carga en el Pipeline de Renderizado
+    "Compilación KaTeX (Fórmulas)" : 38
+    "Generación Vectorial Mermaid" : 28
+    "Compilación Marked (Markdown)" : 18
+    "Procesamiento Token Shield" : 10
+    "Filtrado DOMPurify" : 6
+\`\`\`
+
+---
+
+### 8. Historial de Control de Versiones (\`gitGraph\`)
+
+\`\`\`mermaid
+gitGraph
+    commit id: "v1.0-monolito"
+    commit id: "add-katex-local"
+    branch modulo-documentos
+    checkout modulo-documentos
+    commit id: "split-view-base"
+    commit id: "fix-regex-colisiones"
+    checkout main
+    merge modulo-documentos id: "v2.0-modular"
+    branch arquitectura-shield
+    checkout arquitectura-shield
+    commit id: "nonce-tokens"
+    commit id: "async-mutex-lock"
+    checkout main
+    merge arquitectura-shield id: "v3.0-estable" tag: "v3.0"
+    commit id: "docs-pruebas-modal"
+\`\`\`
+
+---
+
+### 9. Mapa Mental de Estructura de Sistema (\`mindmap\`)
+
+\`\`\`mermaid
+mindmap
+    root((PCM Studio))
+        Entorno de Ejecución
+            Python Flask
+            SQLite Nativo
+            Red LAN Doméstica
+        Frontend de Edición
+            Marked Core
+            KaTeX Local
+            Mermaid Vectorial
+            DOMPurify
+        Mecanismos de Protección
+            Token Shield
+                Nonces Dinámicos
+                Tokens Efímeros
+            Control de Concurrencia
+                Mutex Asíncrono
+                Verificación de Revisiones
+        Herramientas Integradas
+            Gestor de Imágenes
+            Exportación PDF A4
+            Catálogo de Plantillas
+\`\`\`
+
+---
+
+### 10. Mapeo de Recorrido del Usuario (\`journey\`)
+
+\`\`\`mermaid
+journey
+    title Experiencia de Edición y Persistencia
+    section Inicialización
+        Abrir biblioteca de documentos: 5: Usuario
+        Cargar documento técnico: 5: Usuario
+    section Edición Avanzada
+        Escribir texto Markdown: 5: Usuario
+        Insertar matrices y fórmulas: 4: Usuario
+        Definir flujos con Mermaid: 5: Usuario
+    section Sincronización
+        Pulsar Ctrl + S: 5: Usuario
+        Evaluación de colisiones: 5: Sistema
+        Confirmación visual en badge: 5: Usuario
+\`\`\`
+
+---
+
+### 11. Línea de Tiempo Evolutiva (\`timeline\`)
+
+\`\`\`mermaid
+timeline
+    title Evolución del Gestor de Documentos
+    2026-Q1 : Arquitectura Monolítica : Persistencia básica en SQLite : Renderizado elemental de texto
+    2026-Q2 : Modularización : Separación mediante Blueprints : Soporte local offline para KaTeX
+    2026-Q3 : Madurez Técnica : Token Shield contra colisiones : Diagramas Mermaid con soporte dinámico : Mutex asíncrono en red local
+\`\`\`
+
+---
+
+### 12. Matriz de Cuadrantes (\`quadrantChart\`)
+
+\`\`\`mermaid
+quadrantChart
+    title Evaluacion de Librerias segun Esfuerzo y Utilidad
+    x-axis Menor Esfuerzo --> Mayor Esfuerzo
+    y-axis Menor Utilidad --> Mayor Utilidad
+    quadrant-1 Prioridad Estrategica
+    quadrant-2 Alta Rentabilidad
+    quadrant-3 Mantenimiento Marginal
+    quadrant-4 Monitoreo de Complejidad
+    KaTeX: [0.65, 0.92]
+    Mermaid: [0.82, 0.95]
+    Marked: [0.35, 0.88]
+    DOMPurify: [0.25, 0.78]
+    Footnotes: [0.18, 0.45]
+\`\`\`
+`
     },
     gfm: {
-        prompt: `Genera una especificación técnica en GitHub Flavored Markdown (GFM).
-Requisitos:
-1. Tablas estructuradas con alineación.
-2. Listas de tareas con checkboxes (- [x] y - [ ]).
-3. Formateo tipográfico: ~~tachado~~, ==marcado==, subíndices (~H2O~) y superíndices (^2^).`,
-        markdown: `| Servicio | Protocolo | Estado |\n| :--- | :---: | ---: |\n| Backend Flask | HTTP / REST | Activo |\n| Base de Datos | SQLite | Conectado |\n\n- [x] Sanitización con DOMPurify\n- [ ] Exportación directa a PDF\n\nFórmula química: H~2~O  |  Potencia: 2^10^ = 1024  |  ==Importante==`
-    }
+        prompt: `Genera una especificación técnica completa en GitHub Flavored Markdown (GFM).
+Requisitos estrictos:
+1. Incluye una tabla exhaustiva con cabecera y alineaciones mixtas (:---, :---:, ---:), con texto formateado dentro de celdas.
+2. Incluye listas de tareas jerárquicas con checkboxes (- [x] y - [ ]).
+3. Incluye notas al pie de página funcionales usando la sintaxis [^1] y sus definiciones al pie del texto.
+4. Aplica tipografía extendida: tachado (~~texto~~), resaltado (==texto== o <mark>), subíndices (H~2~O), superíndices (2^16^) y atajos de teclado con <kbd>.
+5. Incluye un bloque desplegable usando <details> y <summary>.`,
+        markdown: `# Batería Integral de Pruebas: Especificación GFM y Tipografía
+
+Documento de validación técnica para evaluar el cumplimiento del estándar GitHub Flavored Markdown, notas al pie, tablas complejas y componentes tipográficos en PCM.
+
+---
+> ⚠️ **Restricciones y Limitaciones del Motor GFM en este Entorno:**
+> * **Tablas estructuradas:** Cada fila debe abrir y cerrar con barras verticales (\`|\`). Los separadores de alineación (\`:---\`, \`:---:\`, \`---:\`) son obligatorios para garantizar compatibilidad con navegadores y PDF.
+> * **Notas al pie de página:** Usar formato \`[^clave]\` en el cuerpo del texto y definir la referencia \`[^clave]: Explicación\` al pie del documento. No dejar espacios entre el corchete y el acento circunflejo.
+> * **Etiquetas HTML admitidas:** Se permite el uso de \`<kbd>\`, \`<mark>\`, \`<sub>\`, \`<sup>\`, \`<details>\` y \`<summary>\` gracias a la lista blanca de sanitización de DOMPurify.
+> * **Listas de verificación:** Los checkboxes (\`- [ ]\` y \`- [x]\`) requieren un espacio obligatorio tras los corchetes para compilarse como elementos de formulario interactivos o vectoriales.
+---
+
+### 1. Matriz de Auditoría y Arquitectura de Componentes
+
+| Módulo / Librería | Versión | Tipo de Procesamiento | Nivel de Aislamiento[^1] | Estado de Concurrencia[^2] | Rendimiento (DPI) |
+| :--- | :---: | :---: | :---: | :---: | ---: |
+| **Marked.js** | 12.x | Lexer / Parser AST | Seguro por Token Shield | Lectura Compartida | 96 (Nativo) |
+| **KaTeX** | Local | Renderizado Matemático | Delimitadores protegidos | Aislado en memoria | 300 (Vectorial) |
+| **Mermaid.js** | 10.x | Vectorial SVG Dinámico | Contenedor cerrado | Mutex LAN Requerido | Escalable A4 |
+| **DOMPurify** | 3.x | Sanitización DOM | Lista blanca estricta | Inmutable | N/A |
+| **SQLite Driver** | WAL | Persistencia Relacional | Transaccional ACID | Cerrojo Asíncrono | 100% LAN |
+
+---
+
+### 2. Control de Tareas del Pipeline de Despliegue
+
+#### Fase A: Blindaje y Seguridad
+- [x] Implementar aislamiento de bloques mediante \`Token Shield\` con nonces dinámicos.
+- [x] Configurar política de sanitización en DOMPurify para preservar etiquetas SVG e id's generados.
+- [x] Desactivar corte arbitrario de palabras en diagramas mediante directivas CSS.
+
+#### Fase B: Motor de Paginación y Exportación
+- [x] Definir reglas CSS \`@media print\` para hoja A4 con márgenes de 18mm.
+- [x] Incorporar soporte de salto forzado mediante directiva \`\\newpage\`.
+- [ ] Implementar visor de previsualización en dos columnas para monitores ultrapanorámicos.
+- [ ] Agregar exportador opcional de copia de seguridad en archivo \`.tar.gz\`.
+
+---
+
+### 3. Tipografía Extendida, Resaltado y Atajos de Teclado
+
+* **Atajos de interfaz:** Para guardar los cambios pulse <kbd>Ctrl</kbd> + <kbd>S</kbd>; para forzar la sincronización del editor use <kbd>Ctrl</kbd> + <kbd>F5</kbd>.
+* **Enfasis tipográfico y marcado:** Este es un texto con ==marcado de advertencia fluorescente== y este contiene fragmentos ~~deprecados o eliminados del estándar~~.
+* **Fórmulas moleculares y notación atómica:** Agua (H~2~O), dióxido de carbono (CO~2~), glucosa (C~6~H~12~O~6~) e ion sulfato (SO~4~^2-^).
+* **Superíndices exponenciales en texto:** 2^16^ = 65536 combinaciones posibles en espacio de direcciones.
+
+---
+
+### 4. Bloques Desplegables y Especificaciones Detalladas
+
+<details>
+<summary><b>🔍 Clic para inspeccionar configuración recomendada de servidor LAN</b></summary>
+
+\`\`\`json
+{
+  "servidor": "Flask Monolítico",
+  "puerto_escucha": 5000,
+  "modo_hilos": "threaded=True",
+  "base_datos": {
+    "motor": "sqlite3",
+    "journal_mode": "WAL",
+    "synchronous": "NORMAL",
+    "timeout_bloqueo_ms": 5000
+  },
+  "politica_tokens": "UUIDv4_Nonce_Isolated"
+}
+\`\`\`
+
+</details>
+
+---
+
+### 5. Bloques de Alerta y Directivas de Sistema
+
+> 📘 **Nota Arquitectónica:**  
+> Las notas al pie de página se compilan automáticamente mediante la extensión \`marked-footnote\`. Las referencias múltiples a una misma nota se agruparán en un índice al pie de la página.
+
+> ⚠️ **Precaución en Impresión:**  
+> Si una tabla contiene más de 20 filas, asegúrese de verificar que los encabezados de tabla mantengan su alineación visual en el diálogo de vista previa del navegador.
+
+---
+
+[^1]: Protegido contra colisiones accidentales de delimitadores mediante expresiones regulares de no captura.
+[^2]: Administrado por el cerrojo asíncrono para prevenir escrituras concurrentes que corrompan el archivo SQLite.`
+    },
 };
 
 function abrirModalPruebas() {
@@ -908,6 +1619,75 @@ function insertarEnEditor(reemplazarTodo) {
     input.focus();
 }
 
+/**
+ * Emula el motor de paginación de Chromium evaluando bloque por bloque
+ * e insertando la línea de corte exactamente donde el navegador hace el salto.
+ */
+function actualizarPaginacionVisual() {
+    if (!output) return;
+
+    output.querySelectorAll('.a4-page-marker').forEach(el => el.remove());
+
+    const tester = document.createElement('div');
+    tester.style.height = '261mm';
+    tester.style.position = 'absolute';
+    tester.style.visibility = 'hidden';
+    document.body.appendChild(tester);
+    const ALTO_PAGINA_PX = tester.clientHeight || 986;
+    document.body.removeChild(tester);
+
+    const hijos = Array.from(output.children);
+    let alturaAcumulada = 0;
+    let numPagina = 1;
+
+    for (let i = 0; i < hijos.length; i++) {
+        const el = hijos[i];
+
+        if (el.classList.contains('no-print') || el.classList.contains('a4-page-marker')) continue;
+
+        if (el.classList.contains('pdf-page-break')) {
+            alturaAcumulada = 0;
+            numPagina++;
+            continue;
+        }
+
+        const estilo = window.getComputedStyle(el);
+        const marginTop = parseFloat(estilo.marginTop) || 0;
+        const marginBottom = parseFloat(estilo.marginBottom) || 0;
+        const altoTotalBloque = el.offsetHeight + marginTop + marginBottom;
+
+        // Si el bloque actual no cabe en lo que resta de la carilla
+        if (alturaAcumulada > 0 && (alturaAcumulada + altoTotalBloque > ALTO_PAGINA_PX)) {
+            let elementoDondeCortar = el;
+
+            // Si el elemento anterior era un título o un separador, el corte debe ir ANTES del título
+            if (i > 0) {
+                const elAnterior = hijos[i - 1];
+                if (/^H[1-6]$/i.test(elAnterior.tagName) || elAnterior.tagName === 'HR') {
+                    elementoDondeCortar = elAnterior;
+                }
+            }
+
+            const estiloCorte = window.getComputedStyle(elementoDondeCortar);
+            const mTopCorte = parseFloat(estiloCorte.marginTop) || 0;
+
+            const marker = document.createElement('div');
+            marker.className = 'a4-page-marker no-print';
+            marker.style.top = `${elementoDondeCortar.offsetTop - mTopCorte}px`;
+            marker.innerHTML = `<span>📄 Límite Pág. ${numPagina} (A4)</span>`;
+            output.appendChild(marker);
+
+            // Reiniciar la cuenta considerando los elementos trasladados
+            alturaAcumulada = (elementoDondeCortar !== el) 
+                ? (elementoDondeCortar.offsetHeight + altoTotalBloque) 
+                : altoTotalBloque;
+            numPagina++;
+        } else {
+            alturaAcumulada += altoTotalBloque;
+        }
+    }
+}
+
 /* ==============================================================================
    SECCIÓN 11: CICLO DE VIDA Y EVENTOS GLOBALES DEL NAVEGADOR
    ============================================================================== */
@@ -946,6 +1726,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     localStorage.removeItem("pcm_doc_draft");
+    actualizarNumerosLinea();
     renderizarDocumento();
 });
 </script>

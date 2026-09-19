@@ -646,7 +646,7 @@ def api_subir_imagen_documento():
         return jsonify({"ok": False, "error": "Archivo vacío"}), 400
 
     if not extension_valida(archivo.filename):
-        return jsonify({"ok": False, "error": "Formato inválido (usa PNG, JPG, WEBP, GIF o SVG)"}), 400
+        return jsonify({"ok": False, "error": "Formato inválido (usa PNG, JPG, WEBP, GIF)"}), 400
 
     os.makedirs(CARPETA_IMAGENES_DOCS, exist_ok=True)
 

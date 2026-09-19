@@ -244,9 +244,6 @@ Una vez completada la compilación:
 
 2. Puedes mover ambos ejecutables a cualquier carpeta independiente. Al iniciar `PCMPrivateClipManager.exe`, el sistema generará automáticamente sus directorios de trabajo, el archivo de configuración `.env` de fábrica y la base de datos `pcm.db`.
 
-```
-
-```
 
 
 

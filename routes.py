@@ -846,6 +846,14 @@ def configuracion():
 
         return redirect(url_for("clips.configuracion", guardado=1))
 
+    registrar_log("Panel de configuración y ajustes del sistema abierto")
+
+    # Métricas de base de datos SQLite
+    conn = database.obtener_conexion()
+    total_clips = conn.execute(
+        "SELECT COUNT(*) FROM clips WHERE categoria NOT IN ('Novelas', 'Borrador', 'Resumen') AND categoria NOT LIKE 'Codigo:%'"
+    ).fetchone()[0]
+
     # Métricas de base de datos SQLite
     conn = database.obtener_conexion()
     total_clips = conn.execute(

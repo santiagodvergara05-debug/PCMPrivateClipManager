@@ -9,7 +9,7 @@ Punto de entrada principal del sistema. Responsabilidades:
 4. Motor de autorreparación, sanitización y serialización segura del archivo .env.
 5. Auditoría de integridad estructural y concurrencia de la base de datos SQLite.
 6. Aprovisionamiento, saneamiento de directorios y purga de archivos huérfanos.
-7. Resolución dinámica de interfaz LAN y puesta en marcha del servidor WSGI.
+7. Resolución dinámica de interfaz local/LAN y puesta en marcha del servidor.
 ==============================================================================
 """
 
@@ -72,28 +72,12 @@ app.register_blueprint(clips_bp)
 app.config["MAX_CONTENT_LENGTH"] = 250 * 1024 * 1024  # 262,144,000 bytes
 
 # ------------------------------------------------------------------------------
-# BLINDAJE DE IDENTIDAD: POLÍTICA DE COOKIES DE SESIÓN 
+# BLINDAJE DE IDENTIDAD: POLÍTICA DE COOKIES DE SESIÓN
 #  HttpOnly → mitiga robo de cookie mediante JavaScript
 #  SameSite=Lax → mitiga una parte importante de ataques CSRF
 # ------------------------------------------------------------------------------
-
-# 1. Flag HttpOnly (Mitigación de Robo de Sesión por XSS):
-#    Indica al navegador que la cookie de sesión NO puede ser leída mediante JavaScript
-#    (bloquea llamadas tipo document.cookie). Si existiera una inyección de script,
-#    el atacante no podrá extraer el token de sesión en texto plano para secuestrar la cuenta.
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-
-# 2. Flag SameSite=Lax (Mitigación Directa contra CSRF):
-#    Restringe el contexto de envío de la cookie. El navegador NO adjuntará la cookie
-#    en peticiones de origen cruzado (cross-site) que utilicen métodos inseguros (POST, PUT, DELETE).
-#    Si una pestaña externa intenta enviar un formulario oculto hacia http://127.0.0.1:5545/configuracion/borrar_todo,
-#    el navegador retiene la cookie, Flask recibe la petición como un usuario anónimo y la rechaza.
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-
-# 3. Flag Secure (Transmisión exclusiva por canal cifrado):
-#    ADVERTENCIA DE ENTORNO LAN: Se mantiene explícitamente en False porque PCM está diseñado
-#    para operar en redes locales sin certificados SSL/TLS (http://). Si se fijara en True,
-#    el navegador descartaría la cookie al no detectar HTTPS y rompería el inicio de sesión.
 app.config["SESSION_COOKIE_SECURE"] = False
 
 
@@ -111,7 +95,7 @@ def error_archivo_demasiado_grande(e):
 # ==============================================================================
 # SECCIÓN 3: MOTOR DE TELEMETRÍA Y LOGS ESTILO INIT / KERNEL
 # ==============================================================================
-def klog(estado, mensaje, delay=0.12):
+def klog(estado, mensaje, delay=0.10):
     """
     Imprime mensajes de telemetría en consola formateados con códigos de color ANSI
     simulando el inicio de un kernel Linux. Respeta terminales sin soporte TTY.
@@ -135,23 +119,21 @@ def klog(estado, mensaje, delay=0.12):
 # SECCIÓN 4: GESTIÓN, RESILIENCIA Y AUTORREPARACIÓN DE ENTORNO (.ENV)
 # ==============================================================================
 VALORES_PREDETERMINADOS = {
-    "SISTEMA_INICIALIZADO": "true",
     "SECRET_KEY": lambda: secrets.token_hex(32),
+    "CONTRASENA_MOSTRADA": "false",
+    "AUTO_ABRIR_NAVEGADOR": "true",
+    "FLASK_DEBUG": "false",
+    "LOG_MODE": "false",
+    "PORT": "5545",
+    "HOST": "127.0.0.1",
+    "SISTEMA_INICIALIZADO": "true",
     "MASTER_KEY": lambda: secrets.token_hex(32),
     "APP_PASSWORD": "cambiame",
-    "CONTRASENA_MOSTRADA": "false",
-    "AUTO_ABRIR_NAVEGADOR": "false",
-    "FLASK_DEBUG": "true",
-    "LOG_MODE": "true",
-    "PORT": "5545",
-    "HOST": "0.0.0.0",
 }
 
 def serializar_valor_env(valor):
     """
-    Normaliza y escapa valores para persistencia en .env:
-    1. Elimina retornos de carro y saltos de línea para prevenir inyecciones de variables.
-    2. Escapa barras invertidas y comillas simples para admitir contraseñas con caracteres especiales.
+    Normaliza y escapa valores para persistencia en .env.
     """
     v_str = str(valor).replace("\r", "").replace("\n", "")
     v_str = v_str.replace("\\", "\\\\").replace("'", r"\'")
@@ -160,8 +142,7 @@ def serializar_valor_env(valor):
 
 def escribir_env_seguro(ruta_env, mapa_valores):
     """
-    Escribe atómicamente todas las claves del archivo .env en una única pasada con serialización segura.
-    Implementa reintentos con pausa para neutralizar bloqueos de archivo en Windows (WinError 5).
+    Escribe atómicamente todas las claves del archivo .env en una única pasada.
     """
     for _ in range(4):
         try:
@@ -180,13 +161,12 @@ def sanitizar_y_reparar_env(ruta_env):
     1. Detecta archivos .env ilegibles o alterados con datos binarios y los aísla en cuarentena.
     2. Regenera parámetros faltantes con generadores criptográficos independientes.
     3. Normaliza rangos de puerto (1..65535) y direcciones IP de enlace.
-    Devuelve: (faltantes, ya_inicializado, env_existia, archivo_danado, advertencias).
     """
     valores = {}
     archivo_danado = False
     env_existia = os.path.exists(ruta_env)
 
-    # 1. Comprobación de legibilidad del archivo existente
+    # 1. Comprobación de legibilidad
     if env_existia:
         try:
             with open(ruta_env, "r", encoding="utf-8") as f:
@@ -195,7 +175,7 @@ def sanitizar_y_reparar_env(ruta_env):
         except Exception:
             archivo_danado = True
 
-    # 2. Aislamiento preventivo ante daños de codificación o inyección binaria
+    # 2. Aislamiento preventivo ante sabotaje o corrupción
     if archivo_danado:
         ya_inicializado = True
         klog("fail", "Archivo .env ilegible o corrupto (sabotaje de datos binarios).")
@@ -210,7 +190,6 @@ def sanitizar_y_reparar_env(ruta_env):
                 pass
         valores = {}
     else:
-        # El sistema ya estuvo en marcha si el flag es 'true' o si pcm.db ya reside en disco
         flag_env = str(valores.get("SISTEMA_INICIALIZADO", "")).strip("'\"").lower() == "true"
         ya_inicializado = flag_env or os.path.exists(DB_PATH)
 
@@ -247,10 +226,10 @@ def sanitizar_y_reparar_env(ruta_env):
         hubo_cambios = True
 
     # 6. Sanitización de Interfaz de Escucha (HOST)
-    host_raw = str(valores.get("HOST", "0.0.0.0")).strip("'\"")
+    host_raw = str(valores.get("HOST", "127.0.0.1")).strip("'\"")
     if host_raw not in ["127.0.0.1", "0.0.0.0"]:
-        advertencias.append(f"Host no estándar detectado ({host_raw}). Normalizando a 0.0.0.0...")
-        valores["HOST"] = "0.0.0.0"
+        advertencias.append(f"Host no estándar detectado ({host_raw}). Normalizando a 127.0.0.1...")
+        valores["HOST"] = "127.0.0.1"
         hubo_cambios = True
 
     # 7. Persistencia final en disco
@@ -274,37 +253,40 @@ def auditar_integridad_db(db_path):
     - PRAGMA integrity_check para detectar páginas de disco corruptas.
     - Presencia de esquemas relacionales mínimos obligatorios ('clips', 'documentos').
     - Cuantifica registros por categoría para telemetría.
-    - Maneja bloqueos transaccionales (locks concurrentes).
     """
     if not os.path.exists(db_path):
         return "ausente", 0, 0, 0, 0
 
     conn = None
     try:
-        # Timeout preventivo corto para evitar congelamientos si la base está capturada
         conn = sqlite3.connect(db_path, timeout=2.0)
         cur = conn.cursor()
 
-        # Validación estructural de páginas
         cur.execute("PRAGMA integrity_check;")
         res = cur.fetchone()
         if not res or res[0] != "ok":
             return "corrupta", 0, 0, 0, 0
 
-        # Verificación estricta de esquemas maestros
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('clips', 'documentos');")
         tablas = [r[0] for r in cur.fetchall()]
         if len(tablas) < 2:
             return "incompleta", 0, 0, 0, 0
 
-        # Cómputo de métricas para el log de inicio
-        cur.execute("SELECT COUNT(*) FROM clips WHERE categoria NOT IN ('Novelas', 'Borrador', 'Resumen') AND categoria NOT LIKE 'Codigo:%';")
+        # Cómputo de métricas con soporte para las 5 categorías de notas
+        cur.execute("""
+            SELECT COUNT(*) FROM clips 
+            WHERE categoria NOT IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Novelas') 
+              AND categoria NOT LIKE 'Codigo:%';
+        """)
         total_clips = cur.fetchone()[0]
 
         cur.execute("SELECT COUNT(*) FROM clips WHERE categoria LIKE 'Codigo:%';")
         total_codigo = cur.fetchone()[0]
 
-        cur.execute("SELECT COUNT(*) FROM clips WHERE categoria IN ('Novelas', 'Borrador', 'Resumen');")
+        cur.execute("""
+            SELECT COUNT(*) FROM clips 
+            WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Novelas');
+        """)
         total_resumenes = cur.fetchone()[0]
 
         cur.execute("SELECT COUNT(*) FROM documentos;")
@@ -329,7 +311,7 @@ def auditar_integridad_db(db_path):
 def sanear_directorios_y_archivos(ya_inicializado=False):
     """
     Verifica y aprovisiona los directorios indispensables para la ejecución.
-    Elimina archivos temporales o huérfanos de 0 bytes causados por cierres abruptos o sabotaje.
+    Elimina archivos temporales o huérfanos de 0 bytes.
     """
     directorios = [
         ("templates", os.path.join(DIRECTORIO_RAIZ, "templates")),
@@ -344,13 +326,11 @@ def sanear_directorios_y_archivos(ya_inicializado=False):
             if ya_inicializado and nombre == "uploads/documentos":
                 klog("warn", "Directorio multimedia ausente o eliminado externamente: /uploads/documentos")
                 klog("init", "Regenerando carpeta vacía para permitir nuevas subidas...")
-                klog("warn", "Las imágenes de documentos existentes fallarán hasta restaurar un backup .ZIP.")
             else:
                 klog("init", f"Directorio aprovisionado: /{nombre}")
         else:
             klog("ok", f"Directorio confirmado: /{nombre}")
 
-    # Purgar archivos de 0 bytes en uploads generados por transferencias fallidas
     if os.path.exists(UPLOADS_DIR):
         purgados = 0
         for f in os.listdir(UPLOADS_DIR):
@@ -369,7 +349,6 @@ def sanear_directorios_y_archivos(ya_inicializado=False):
 # SECCIÓN 7: RUTINA DE ARRANQUE (BOOTLOADER), RED LAN Y SERVIDOR WSGI
 # ==============================================================================
 if __name__ == "__main__":
-    # Bandera de Werkzeug para suprimir el banner duplicado en modo recarga automática
     es_reloader = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
 
     # Migración transparente de versiones heredadas (cliptemp.db -> pcm.db)
@@ -382,41 +361,37 @@ if __name__ == "__main__":
 
     if not es_reloader:
         print("\n" + "=" * 65)
-        print(f"   BOOTLOADER :: PCMPrivateClipManager v{VERSION} (LAN & RESILIENT)   ")
+        print(f"   BOOTLOADER :: PCMPrivateClipManager v{VERSION} (OFFLINE & SECURE)   ")
         print("=" * 65)
-        time.sleep(0.2)
+        time.sleep(0.15)
 
-        # 1. Auditoría y reparación de variables de entorno (.env)
+        # 1. Auditoría y aprovisionamiento del entorno .env
         faltantes, ya_inicializado, env_existia, archivo_danado, advertencias = sanitizar_y_reparar_env(ENV_PATH)
 
         if not env_existia:
-            klog("warn", "Configuración .env no encontrada. Iniciando aprovisionamiento...")
+            klog("warn", "Configuración .env no encontrada. Iniciando aprovisionamiento inicial...")
             for clave in faltantes:
-                klog("init", f"Variable faltante detectada: generando {clave} con su valor predeterminado...")
-            klog("ok", f"Archivo .env creado con {len(faltantes)} variable(s) iniciales.")
+                klog("init", f"Generando clave predeterminada: {clave}")
+            klog("ok", f"Archivo .env de fábrica creado con {len(faltantes)} variables.")
 
         elif archivo_danado:
             for clave in faltantes:
-                klog("init", f"Variable regenerada tras cuarentena: {clave}...")
-            klog("ok", f"Archivo .env reconstruido con {len(faltantes)} variable(s) iniciales.")
+                klog("init", f"Regenerando clave tras aislamiento: {clave}")
+            klog("ok", f"Archivo .env recuperado con {len(faltantes)} variables.")
 
         else:
             klog("ok", "Archivo .env cargado desde almacenamiento local.")
             for adv in advertencias:
                 klog("warn", adv)
-                if "SISTEMA_INICIALIZADO" in adv:
-                    klog("info", "SISTEMA_INICIALIZADO= puede indicar sabotaje o borrado accidental, no se recomienda modificar manualmente.")
 
             for clave in faltantes:
-                klog("init", f"Variable faltante detectada: generando {clave} con su valor predeterminado...")
+                klog("init", f"Restaurando parámetro faltante: {clave}")
 
             if faltantes or advertencias:
-                total_mod = len(faltantes) + len(advertencias)
-                klog("ok", f"Archivo .env reparado ({total_mod} parámetro(s) restaurado(s)).")
+                klog("ok", "Archivo .env reparado con éxito.")
             else:
-                klog("ok", "Archivo .env verificado: todas las variables presentes.")
+                klog("ok", "Archivo .env verificado: integridad completa.")
 
-        # Cargar variables en el entorno del proceso
         try:
             load_dotenv(ENV_PATH, override=True)
         except Exception:
@@ -425,10 +400,10 @@ if __name__ == "__main__":
         app.secret_key = os.environ.get("SECRET_KEY")
 
         if os.environ.get("MASTER_KEY") and os.environ.get("SECRET_KEY"):
-            klog("ok", "Llaves maestras criptográficas listas (256 bits).")
+            klog("ok", "Llaves criptográficas maestras activas (256 bits).")
 
         # 2. Comprobación y aprovisionamiento de carpetas físicas
-        klog("init", "Verificando estructura de directorios y almacenamiento...")
+        klog("init", "Verificando estructura de almacenamiento...")
         sanear_directorios_y_archivos(ya_inicializado=ya_inicializado)
 
         # 3. Auditoría de integridad de base de datos SQLite
@@ -436,65 +411,35 @@ if __name__ == "__main__":
 
         if estado_db == "bloqueada":
             klog("fail", "La base de datos se encuentra bloqueada por otro proceso.")
-            klog("warn", "Esperando 2 segundos para liberación del candado...")
+            klog("warn", "Esperando 2 segundos...")
             time.sleep(2)
             estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
             if estado_db == "bloqueada":
-                klog("fail", "Imposible acceder a pcm.db. Cierre el proceso que mantiene el bloqueo.")
+                klog("fail", "Imposible acceder a pcm.db. Cierre el proceso que mantiene el candado.")
                 sys.exit(1)
 
         if estado_db == "ausente":
-            if not ya_inicializado:
-                # Caso A: Primer despliegue
-                klog("info", "Almacenamiento persistente SQLite ausente.")
-                klog("init", "Creando base de datos SQLite y esquemas relacionales...")
-                klog("info", "pcm.db será generado en el directorio raíz de la aplicación.")
-                database.inicializar_db()
-                klog("ok", "Base de datos creada e indexada correctamente.")
-            else:
-                # Caso B: Base eliminada accidentalmente con .env previo
-                klog("fail", "Almacenamiento SQLite ausente o eliminado por accidente.")
-                klog("warn", "Se detectó configuración previa (.env) pero pcm.db no existe.")
-                klog("warn", "Creando una base de datos SQLite limpia para permitir el arranque...")
-                klog("init", "Creando base de datos SQLite y esquemas relacionales...")
-                klog("info", "pcm.db será generado en el directorio raíz de la aplicación.")
-                database.inicializar_db()
-                klog("ok", "Base de datos SQLite limpia configurada.")
-                klog("warn", "Base antigua no recuperable. Restaure desde /configuracion si posee backup.")
+            klog("info", "Base de datos persistente ausente. Generando pcm.db limpio...")
+            database.inicializar_db()
+            klog("ok", "Base de datos SQLite creada e indexada.")
 
         elif estado_db == "corrupta":
-            klog("fail", "Base de datos SQLite dañada o ilegible (Fallo de integridad).")
+            klog("fail", "Base de datos dañada o ilegible. Aislándola en cuarentena...")
             cuarentena_db = f"pcm.db.corrupt_{int(time.time())}"
-            liberado = False
             try:
                 os.rename(DB_PATH, os.path.join(DIRECTORIO_RAIZ, cuarentena_db))
-                klog("warn", f"Archivo dañado aislado en cuarentena: {cuarentena_db}")
-                liberado = True
-            except Exception as err_mv:
-                klog("warn", f"Fallo al mover archivo ({err_mv}). Forzando eliminación...")
+                klog("warn", f"Base corrupta aislada: {cuarentena_db}")
+            except Exception:
                 try:
                     os.remove(DB_PATH)
-                    liberado = True
-                except Exception as err_rm:
-                    klog("fail", f"Fallo irrecuperable de disco: {err_rm}")
-
-            if liberado:
-                klog("init", "Regenerando esquema SQLite limpio para restablecer servicio...")
-                database.inicializar_db()
-                klog("ok", "Servicio SQLite recuperado en estado limpio.")
-                klog("warn", "Base dañada aislada. Restaure su backup desde Configuración.")
-            else:
-                sys.exit(1)
-
-        elif estado_db == "incompleta":
-            klog("warn", "Desviación de esquema detectada (tablas faltantes).")
-            klog("init", "Ejecutando migración y regeneración de tablas faltantes...")
+                except Exception:
+                    pass
             database.inicializar_db()
-            klog("ok", "Esquema relacional completado sin pérdida de datos existentes.")
+            klog("ok", "Nueva base de datos inicializada en estado limpio.")
 
-        elif estado_db == "ok":
+        elif estado_db in ["incompleta", "ok"]:
             database.inicializar_db()
-            klog("ok", f"Base verificada: {n_clips} clips, {n_codigos} cod, {n_resumenes} bor, {n_docs} docs.")
+            klog("ok", f"Base verificada: {n_clips} clips, {n_codigos} cod, {n_resumenes} notas, {n_docs} docs.")
 
         # 4. Verificación de última instantánea de respaldo
         ruta_backup = os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_BACKUP)
@@ -505,42 +450,44 @@ if __name__ == "__main__":
                     fecha_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
                     klog("ok", f"Último respaldo verificado: {fecha_str}")
             except Exception:
-                klog("warn", "Archivo de seguimiento de backup corrupto (ignorado con seguridad).")
+                klog("warn", "Archivo de seguimiento de backup corrupto (ignorado).")
         else:
             klog("info", "No se detecta snapshot de respaldo previo.")
 
-        # 5. Detección y alerta de contraseña por defecto
-        contrasena_ya_mostrada = os.environ.get("CONTRASENA_MOSTRADA", "false").lower() == "true"
+        # 5. Detección y advertencia de credenciales por defecto (sin mutar .env)
+        contrasena_ya_mostrada = os.environ.get("CONTRASENA_MOSTRADA", "false").strip().lower() == "true"
         if os.environ.get("APP_PASSWORD") == "cambiame" and not contrasena_ya_mostrada:
             print("\n" + "!" * 65)
-            print(" [!] ALERTA CRÍTICA: Credencial de fábrica activa ('cambiame')")
-            print(" [i] Cámbiela desde la pestaña Ajustes (⚙️) o mediante CLI_admin.py.")
+            print(" [!] PRIMER INICIO DETECTADO: Credencial temporal activa ('cambiame')")
+            print(" [i] Visualice la Master Key e inicie sesión en la pantalla web.")
             print("!" * 65)
-            set_key(ENV_PATH, "CONTRASENA_MOSTRADA", "true")
-            os.environ["CONTRASENA_MOSTRADA"] = "true"
 
+        # ---> REINCORPORAR ESTE BLOQUE AQUÍ:
         print("\n" + "-" * 65)
-        print(" [i] CONSOLA FUERA DE BANDA DISPONIBLE: python CLI_admin.py")
-        print(" [i] SUITE DE ESTRÉS & RESILIENCIA:      python CLI_chaos.py")
+        comando_cli = "CLI_admin.exe" if ES_EXE else "python CLI_admin.py"
+        print(f" [i] CONSOLA DE ADMINISTRACIÓN DISPONIBLE: {comando_cli}")
         print("-" * 65)
+
+
 
     # Configuración de red y modo de logging de Werkzeug
     load_dotenv(ENV_PATH, override=True)
     app.secret_key = os.environ.get("SECRET_KEY")
 
-    log_mode_activo = os.environ.get("LOG_MODE", "false").lower() == "true"
+    log_mode_activo = os.environ.get("LOG_MODE", "false").strip().lower() == "true"
     if not log_mode_activo:
         logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
-    debug_mode = False if ES_EXE else (os.environ.get("FLASK_DEBUG", "false").lower() == "true")
-    host = os.environ.get("HOST", "0.0.0.0")
+    debug_mode = False if ES_EXE else (os.environ.get("FLASK_DEBUG", "false").strip().lower() == "true")
+    host = os.environ.get("HOST", "127.0.0.1").strip()
     try:
-        port = int(os.environ.get("PORT", "5545"))
+        port = int(os.environ.get("PORT", "5545").strip())
     except ValueError:
         port = 5545
 
-    # Resolución dinámica de la dirección IP para la red local
+    # Resolución de acceso local o LAN
     if not es_reloader:
+        klog("info", f"Modo Debug: {debug_mode}")
         if host == "0.0.0.0":
             ip_lan = "127.0.0.1"
             try:
@@ -554,24 +501,23 @@ if __name__ == "__main__":
                 except Exception:
                     pass
 
-            klog("info", f"Modo Debug: {debug_mode}")
             klog("ok", f"Servidor Local:   http://127.0.0.1:{port}")
             klog("ok", f"Acceso LAN Red:   http://{ip_lan}:{port}")
             klog("info", "Acceso multidispositivo habilitado en la red local.")
         else:
-            klog("info", f"Modo Debug: {debug_mode}")
             klog("ok", f"Servidor Local enrutado en http://{host}:{port}")
-            klog("fail", "Acceso LAN Red: Desactivado (modo exclusivo de equipo local)")
+            klog("fail", f"Acceso LAN Red: no disponible")
+            klog("info", "Acceso LAN Red: Desactivado (modo exclusivo PC local)")
 
         print("-" * 65)
         print(">>> PCMPrivateClipManager OPERATIVO Y LISTO <<<")
         print("-" * 65 + "\n")
 
-    # Apertura diferida del navegador en modo ejecutable
-    if ES_EXE and not es_reloader:
-        auto_abrir = os.environ.get("AUTO_ABRIR_NAVEGADOR", "false").lower() == "true"
-        if auto_abrir:
-            threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
+    # Apertura diferida del navegador
+    auto_abrir = os.environ.get("AUTO_ABRIR_NAVEGADOR", "true").strip().lower() == "true"
+    if auto_abrir and (ES_EXE or not es_reloader):
+        url_destino = f"http://127.0.0.1:{port}"
+        threading.Timer(1.2, lambda: webbrowser.open(url_destino)).start()
 
     # Ejecución del servidor HTTP
     app.run(

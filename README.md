@@ -198,6 +198,74 @@ python CLI_admin.py
 
 ---
 
+
+
+
+
+```markdown
+---
+
+## 📦 Compilación a Ejecutables (.exe - Windows)
+
+Para generar versiones binarias autónomas que no requieran tener Python instalado en el equipo final, puedes empaquetar tanto el servidor principal como la consola de administración utilizando **PyInstaller**.
+
+### 1. Instalar PyInstaller en el entorno virtual
+```bash
+pip install pyinstaller
+
+```
+
+### 2. Compilar el servidor principal (`PCMPrivateClipManager.exe`)
+
+Empaqueta el núcleo del sistema vinculando las carpetas locales de plantillas HTML y recursos estáticos:
+
+```bash
+python -m PyInstaller --noconfirm --onefile --console --name "PCMPrivateClipManager" --add-data "templates;templates" --add-data "static;static" app.py
+
+```
+
+### 3. Compilar la consola administrativa (`CLI_admin.exe`)
+
+Genera el binario de rescate y mantenimiento fuera de banda:
+
+```bash
+python -m PyInstaller --noconfirm --onefile --console --name "CLI_admin" CLI_admin.py
+
+```
+
+### 4. Despliegue de los ejecutables
+
+Una vez completada la compilación:
+
+1. Encontrarás ambos archivos en la carpeta recién creada **`dist/`**:
+* `PCMPrivateClipManager.exe`
+* `CLI_admin.exe`
+
+
+2. Puedes mover ambos ejecutables a cualquier carpeta independiente. Al iniciar `PCMPrivateClipManager.exe`, el sistema generará automáticamente sus directorios de trabajo, el archivo de configuración `.env` de fábrica y la base de datos `pcm.db`.
+
+```
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## 👤 Autor
 
 Desarrollado y mantenido por **[santiagodvergara05-debug]**.

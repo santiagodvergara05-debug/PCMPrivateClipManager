@@ -247,3 +247,7 @@ Una vez completada la compilación:
 ## 👤 Autor
 
 Desarrollado y mantenido por **[santiagodvergara05-debug]**.
+
+## 📄 Licencia
+
+Este proyecto está distribuido bajo los términos de la **GNU Affero General Public License v3.0 (AGPLv3)**. Consulta el archivo [LICENSE](LICENSE) para más información.

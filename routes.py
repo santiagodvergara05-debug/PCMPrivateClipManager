@@ -169,19 +169,59 @@ def inyectar_contexto():
 
 @clips_bp.route("/login", methods=["GET", "POST"])
 def login():
-    """Gestiona el formulario de acceso mediante la contraseña central del entorno."""
+    # Si el usuario ya está autenticado, va directo al panel principal
+    if session.get("autenticado"):
+        return redirect(url_for("clips.index"))
+
+    # Verifica si es el primer inicio ('false' muestra el cartel, 'true' lo oculta)
+    mostrar_credenciales = os.environ.get("CONTRASENA_MOSTRADA", "false").strip().lower() != "true"
     error = None
+
     if request.method == "POST":
-        clave_ingresada = request.form.get("password")
-        if clave_ingresada == os.environ.get("APP_PASSWORD", "cambiame"):
+        password_ingresada = request.form.get("password", "").strip()
+        app_password = os.environ.get("APP_PASSWORD", "cambiame").strip()
+        master_key = os.environ.get("MASTER_KEY", "").strip()
+
+        # Validación contra APP_PASSWORD o MASTER_KEY
+        if password_ingresada and (password_ingresada == app_password or (master_key and password_ingresada == master_key)):
             session["autenticado"] = True
-            registrar_log(f"Inicio de sesión exitoso desde IP: {request.remote_addr}")
+            session.permanent = True
+
+            try:
+                registrar_log(f"Inicio de sesión exitoso desde {request.remote_addr}")
+            except Exception:
+                pass
+
+            # Si era el primer inicio, muta el .env a true para ocultar credenciales a futuro
+            if mostrar_credenciales:
+                try:
+                    set_key(RUTA_ENV, "CONTRASENA_MOSTRADA", "true")
+                    os.environ["CONTRASENA_MOSTRADA"] = "true"
+                    try:
+                        registrar_log("Primer inicio detectado: aviso de credenciales ocultado permanentemente")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    print(f"Error actualizando RUTA_ENV: {e}")
+
             return redirect(url_for("clips.index"))
-        error = "Contraseña incorrecta."
-        registrar_log(f"Intento fallido de autenticación desde IP: {request.remote_addr}")
-    return render_template("login.html", error=error)
+        else:
+            error = "Contraseña incorrecta. Inténtalo de nuevo."
+            try:
+                registrar_log(f"Intento fallido de inicio de sesión desde {request.remote_addr}")
+            except Exception:
+                pass
 
+    temp_password = os.environ.get("APP_PASSWORD", "cambiame")
+    master_key_val = os.environ.get("MASTER_KEY", "")
 
+    return render_template(
+        "login.html",
+        error=error,
+        mostrar_credenciales=mostrar_credenciales,
+        temp_password=temp_password,
+        master_key=master_key_val
+    )
 @clips_bp.route("/logout")
 def logout():
     """Limpia las variables de sesión y redirige a la pantalla de login."""
@@ -339,7 +379,7 @@ def eliminar(clip_id):
 # SECCIÓN 4: MÓDULO DE BORRADORES Y RESÚMENES
 # ==============================================
 
-@clips_bp.route("/novelas")
+@clips_bp.route("/notas")
 @login_requerido
 def biblioteca_novelas():
     """Muestra el catálogo de textos extensos (Borradores, Novelas, Resúmenes)."""

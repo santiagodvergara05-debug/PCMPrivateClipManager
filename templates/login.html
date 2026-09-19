@@ -1,25 +1,145 @@
+{# ============================================================================== #}
+{# PCM PRIVATE CLIP MANAGER - ACCESO & AUTENTICACIÓN (LOGIN.HTML)                #}
+{# ============================================================================== #}
+
 {% extends "base.html" %}
 
-{% block title %}ClipTemp - Acceso{% endblock %}
+{% block title %}PCMPrivateClipManager - Acceso al Sistema{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
 {% endblock %}
 
 {% block content %}
-<div class="auth-container">
+<div class="auth-wrapper">
     <div class="auth-card">
-        <h2>ClipTemp Web</h2>
-        <p>Introduce la clave de acceso</p>
+        
+        <!-- CABECERA: IDENTIDAD DEL SISTEMA -->
+        <div class="auth-header">
+            <span class="auth-badge">PCM</span>
+            <h1 class="auth-title">PCMPrivateClipManager</h1>
+            <span class="auth-version">v{{ app_version }}</span>
+        </div>
 
-        {% if error %}
-            <div class="alert-error">{{ error }}</div>
+        <!-- AVISO DE PRIMER INICIO / CREDENCIALES GENERADAS -->
+        {% if mostrar_credenciales %}
+        <div class="initial-creds-box">
+            <div class="creds-title-row">
+                <span class="creds-icon">🔐</span>
+                <div>
+                    <strong>Credenciales iniciales generadas</strong>
+                    <p class="creds-desc">Primer inicio detectado o visualización reactivada por el administrador.</p>
+                </div>
+            </div>
+
+            <div class="cred-field">
+                <div class="cred-label-row">
+                    <label>CONTRASEÑA TEMPORAL</label>
+                    <span class="badge-warn">Cambiar pronto</span>
+                </div>
+                <div class="cred-input-wrap">
+                    <input type="text" id="rawPass" value="{{ temp_password }}" readonly class="cred-input-danger">
+                    <button type="button" class="btn-copy-cred" onclick="copiarCredencial('rawPass', this)">Copiar</button>
+                </div>
+            </div>
+
+            <div class="cred-field">
+                <div class="cred-label-row">
+                    <label>LLAVE MAESTRA (CONFIGURACIÓN CRÍTICA)</label>
+                </div>
+                <div class="cred-input-wrap">
+                    <input type="text" id="rawMasterKey" value="{{ master_key }}" readonly class="cred-input-mono">
+                    <button type="button" class="btn-copy-cred" onclick="copiarCredencial('rawMasterKey', this)">Copiar</button>
+                </div>
+            </div>
+
+            <details class="creds-guide">
+                <summary>¿Dónde modificar estas credenciales?</summary>
+                <div class="creds-guide-content">
+                    <div class="guide-item">
+                        <span class="badge-guide badge-web">Web</span>
+                        <span class="guide-text">Solo <strong>contraseña de acceso</strong> (desde Ajustes / Configuración).</span>
+                    </div>
+                    <div class="guide-item">
+                        <span class="badge-guide badge-cli">CLI</span>
+                        <span class="guide-text">Ambas claves (ejecutando <code>CLI_admin.py</code> o <code>.exe</code>).</span>
+                    </div>
+                    <div class="guide-item">
+                        <span class="badge-guide badge-env">ENV</span>
+                        <span class="guide-text">Edición manual directa en el archivo <code>.env</code>.</span>
+                    </div>
+                </div>
+            </details>
+        </div>
         {% endif %}
 
-        <form action="{{ url_for('clips.login') }}" method="POST">
-            <input type="password" name="password" placeholder="Contraseña de acceso" required autofocus>
-            <button type="submit" class="btn-primary">Entrar</button>
+        <!-- MENSAJE DE ERROR POR CREDENCIAL INVÁLIDA -->
+        {% if error %}
+            <div class="auth-alert-error">
+                <span class="alert-icon">⚠️</span>
+                <span>{{ error }}</span>
+            </div>
+        {% endif %}
+
+        <!-- FORMULARIO DE ACCESO -->
+        <form action="{{ url_for('clips.login') }}" method="POST" class="auth-form" autocomplete="off">
+            <div class="auth-input-group">
+                <div class="auth-input-box">
+                    <span class="auth-lock-icon">🔒</span>
+                    <input type="password" 
+                           id="inputPassword" 
+                           name="password" 
+                           placeholder="Contraseña de acceso" 
+                           required 
+                           autofocus>
+                    <button type="button" class="btn-toggle-eye" onclick="togglePasswordVisibility()" title="Mostrar u ocultar contraseña">
+                        👁️
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-auth-submit">
+                Entrar al Sistema
+            </button>
         </form>
+
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/**
+ * ==============================================================================
+ * PCM PRIVATE CLIP MANAGER - CONTROLADOR DEL ACCESO (LOGIN.JS)
+ * ==============================================================================
+ */
+
+// Conmutar visibilidad de la contraseña en el campo de texto
+function togglePasswordVisibility() {
+    const passInput = document.getElementById("inputPassword");
+    if (!passInput) return;
+    passInput.type = (passInput.type === "password") ? "text" : "password";
+}
+
+// Función para copiar credenciales generadas usando la función universal de base.html
+function copiarCredencial(elementId, btn) {
+    const input = document.getElementById(elementId);
+    if (!input) return;
+
+    if (window.copiarTextoUniversal) {
+        window.copiarTextoUniversal(input.value, btn);
+    } else {
+        navigator.clipboard.writeText(input.value).then(() => {
+            const original = btn.innerText;
+            btn.innerText = "✓";
+            btn.classList.add("copied");
+            setTimeout(() => {
+                btn.innerText = original;
+                btn.classList.remove("copied");
+            }, 1200);
+        });
+    }
+}
+</script>
 {% endblock %}

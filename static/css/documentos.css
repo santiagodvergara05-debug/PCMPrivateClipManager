@@ -1035,3 +1035,120 @@
         page-break-after: avoid !important;
     }
 }
+
+
+.modal-pruebas-tamano {
+    max-width: 1400px;
+    width: 95%;
+}
+
+.pruebas-selector-fila {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.pruebas-selector-fila select {
+    background: #21262d;
+    color: #f0f6fc;
+    border: 1px solid #30363d;
+    padding: 6px 12px;
+    border-radius: 6px;
+    outline: none;
+    font-size: 0.9rem;
+}
+
+.pruebas-seccion {
+    margin-bottom: 16px;
+}
+
+.pruebas-seccion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.modal-textarea-readonly {
+    width: 100%;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #c9d1d9;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.85rem;
+    padding: 10px;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.btn-modal-accion {
+    background: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.btn-modal-accion:hover {
+    background: #30363d;
+    color: #f0f6fc;
+}
+
+.btn-reemplazar {
+    background: #8957e5;
+    border-color: #a371f7;
+    color: #ffffff;
+}
+
+.btn-reemplazar:hover {
+    background: #9a67ea;
+}
+
+.btn-group-modal {
+    display: flex;
+    gap: 8px;
+}
+
+
+/* Ensancha la ventana para alojar cómodamente las 2 columnas */
+.modal-pruebas-tamano {
+    max-width: 1100px;
+    width: 92%;
+}
+
+/* Distribución lado a lado */
+.pruebas-grid-modal {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: stretch;
+}
+
+.pruebas-grid-modal .pruebas-seccion {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0;
+}
+
+/* Altura simétrica para ambas cajas de texto */
+.pruebas-grid-modal .modal-textarea-readonly {
+    height: 520px;          
+    font-size: 0.88rem;
+    line-height: 1.55;
+    resize: vertical;       
+}
+
+/* Adaptabilidad para pantallas reducidas */
+@media (max-width: 850px) {
+    .pruebas-grid-modal {
+        grid-template-columns: 1fr;
+    }
+    .pruebas-grid-modal .modal-textarea-readonly {
+        height: 220px;
+    }
+}

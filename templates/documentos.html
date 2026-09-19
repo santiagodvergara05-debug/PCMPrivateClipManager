@@ -37,8 +37,8 @@
             <button type="button" class="btn-doc-tool" onclick="insertarSaltoPagina()" title="Insertar un corte de página para el PDF">
                 ✂️ Salto A4
             </button>
-            <button type="button" class="btn-doc-tool" onclick="insertarEjemploMath()" title="Cargar ejemplo con fórmulas, tablas y diagramas">
-                📐 Ejemplo
+            <button type="button" class="btn-doc-tool" onclick="abrirModalPruebas()" title="Plantillas, pruebas y prompts">
+                🧪 Ejemplos & Prompts
             </button>
             <button type="button" class="btn-doc-tool" onclick="copiarMarkdown(this)">
                 📋 Copiar MD
@@ -52,10 +52,9 @@
         </div>
     </header>
 
-    <!-- Espacio de trabajo dividido -->
+    <!-- Espacio de trabajo dividido (Split View) -->
     <div class="docs-workspace">
-        
-        <!-- Panel 1: Editor Markdown -->
+        <!-- Panel 1: Editor Markdown crudo -->
         <section class="docs-panel editor-panel no-print">
             <div class="panel-header">
                 <span>✏️ Editor Markdown, LaTeX & Diagramas</span>
@@ -66,24 +65,22 @@
                       spellcheck="false" autofocus>{{ doc['contenido'] if doc else '' }}</textarea>
         </section>
 
-        <!-- Panel 2: Vista previa renderizada -->
+        <!-- Panel 2: Vista previa renderizada en tiempo real -->
         <section class="docs-panel preview-panel">
             <div class="panel-header no-print">
                 <span>👁️ Vista Previa Renderizada</span>
                 <span class="badge-ready">✓ Clic para sincronizar editor</span>
             </div>
-            
             <div id="docOutput" class="doc-rendered-sheet"></div>
         </section>
-
     </div>
 
 </div>
 
-<!-- Input de archivo oculto para subir imágenes de Windows -->
+<!-- Input oculto para subida tradicional de archivos desde el explorador de Windows -->
 <input type="file" id="fileInputImagen" accept="image/png, image/jpeg, image/webp, image/gif, image/svg+xml" style="display: none;">
 
-<!-- MODAL GESTOR DE IMÁGENES -->
+<!-- MODAL 1: GESTOR DE IMÁGENES -->
 <div id="modalImagenes" class="doc-modal-overlay" style="display: none;">
     <div class="doc-modal-container modal-gallery-container">
         <header class="doc-modal-header no-print">
@@ -99,7 +96,55 @@
         <div class="modal-gallery-body">
             <p class="gallery-hint">También puedes pegar capturas directamente con <strong>Ctrl + V</strong> o arrastrar fotos sobre el editor de texto.</p>
             <div id="contenedorGaleria" class="gallery-grid">
-                <!-- Se rellena vía fetch -->
+                <!-- Se rellena dinámicamente vía fetch -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL 2: CATÁLOGO DE PRUEBAS Y PROMPTS -->
+<div id="modalPruebas" class="doc-modal-overlay" style="display: none;">
+    <div class="doc-modal-container modal-pruebas-tamano">
+        <header class="doc-modal-header no-print">
+            <h3 class="doc-modal-title">🧪 Catálogo de Pruebas y Prompts</h3>
+            <div class="doc-modal-actions">
+                <button type="button" class="btn-modal-close" onclick="cerrarModalPruebas()">✕</button>
+            </div>
+        </header>
+
+        <div class="modal-gallery-body" style="padding: 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 14px;">
+            <!-- Selector superior de módulo -->
+            <div class="pruebas-selector-fila">
+                <label for="modalSelectModulo" style="color: #c9d1d9; font-weight: 600;">Selecciona plantilla:</label>
+                <select id="modalSelectModulo" onchange="actualizarContenidoModal(this.value)">
+                    <option value="math">📐 Matemáticas y Cálculo (KaTeX)</option>
+                    <option value="mermaid">📊 Arquitectura y Flujos (Mermaid.js)</option>
+                    <option value="gfm">📝 Markdown GFM y Tipografía</option>
+                </select>
+            </div>
+
+            <!-- Contenedor distribuido en 2 columnas -->
+            <div class="pruebas-grid-modal">
+                <!-- Columna Izquierda: Prompt para IA -->
+                <div class="pruebas-seccion">
+                    <div class="pruebas-seccion-header">
+                        <strong style="color: #f0f6fc;">🤖 Prompt para la IA</strong>
+                        <button type="button" class="btn-modal-accion" onclick="copiarPromptModal()">📋 Copiar Prompt</button>
+                    </div>
+                    <textarea id="modalPromptTexto" class="modal-textarea-readonly" readonly></textarea>
+                </div>
+
+                <!-- Columna Derecha: Markdown de prueba directa -->
+                <div class="pruebas-seccion">
+                    <div class="pruebas-seccion-header">
+                        <strong style="color: #f0f6fc;">📄 Contenido Markdown</strong>
+                        <div class="btn-group-modal">
+                            <button type="button" class="btn-modal-accion" onclick="insertarEnEditor(false)">➕ En cursor</button>
+                            <button type="button" class="btn-modal-accion btn-reemplazar" onclick="insertarEnEditor(true)">🔄 Reemplazar</button>
+                        </div>
+                    </div>
+                    <textarea id="modalMarkdownTexto" class="modal-textarea-readonly" readonly></textarea>
+                </div>
             </div>
         </div>
     </div>
@@ -107,7 +152,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<!-- Librerías locales descargadas -->
+<!-- Librerías locales descargadas para funcionamiento 100% offline / LAN -->
 <script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/purify.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/katex.min.js') }}"></script>
@@ -115,310 +160,352 @@
 <script src="{{ url_for('static', filename='js/mermaid.min.js') }}"></script>
 
 <script>
-    const input = document.getElementById("docInput");
-    const output = document.getElementById("docOutput");
-    const tituloInput = document.getElementById("docTitulo");
-    const docStats = document.getElementById("docStats");
-    const saveStatus = document.getElementById("saveStatus");
-    const fileInputImagen = document.getElementById("fileInputImagen");
-    const modalImagenes = document.getElementById("modalImagenes");
-    const contenedorGaleria = document.getElementById("contenedorGaleria");
+/**
+ * ==============================================================================
+ * PCM PRIVATE CLIP MANAGER - NÚCLEO DE EDICIÓN Y RENDERIZADO V3
+ * ==============================================================================
+ * Este script gestiona el ciclo de vida completo del editor técnico:
+ * 1. Aislamiento por Token Shield (evita colisiones regex con código o LaTeX).
+ * 2. Compilación matemática (KaTeX) y diagramación procedural (Mermaid.js).
+ * 3. Sanitización estricta pero permisiva en estilos LAN (DOMPurify).
+ * 4. Control de concurrencia y prevención de sobrescrituras (Mutex asíncrono).
+ * 5. Gestión de imágenes locales y sincronización bidireccional de scroll.
+ */
 
-    // URLs obtenidas desde atributos del contenedor
-    const docsContainer = document.querySelector(".docs-container");
-    const URL_SUBIR_IMG = docsContainer.getAttribute("data-url-subir");
-    const URL_LISTAR_IMG = docsContainer.getAttribute("data-url-imagenes");
+/* ==============================================================================
+   SECCIÓN 1: DECLARACIONES DEL DOM Y ENDPOINTS DEL SERVIDOR
+   ============================================================================== */
+// Referencias a la interfaz de edición
+const input = document.getElementById("docInput");
+const output = document.getElementById("docOutput");
+const tituloInput = document.getElementById("docTitulo");
+const docStats = document.getElementById("docStats");
+const saveStatus = document.getElementById("saveStatus");
 
-    // ID del documento cargado (null si es nuevo)
-    const docIdInput = document.getElementById("docId");
-    let currentDocId = docIdInput && docIdInput.value ? parseInt(docIdInput.value, 10) : null;
+// Referencias para gestión multimedia
+const fileInputImagen = document.getElementById("fileInputImagen");
+const modalImagenes = document.getElementById("modalImagenes");
+const contenedorGaleria = document.getElementById("contenedorGaleria");
 
-    // Control de versiones y estado sucio contra carreras asincronas
-    let revision = 0;
-    let revisionGuardada = 0;
-    let hayCambiosSinGuardar = false; // Candado para evitar múltiples envíos simultáneos
+// Extracción de rutas seguras provistas por Flask en el contenedor padre
+const docsContainer = document.querySelector(".docs-container");
+const URL_SUBIR_IMG = docsContainer.getAttribute("data-url-subir");
+const URL_LISTAR_IMG = docsContainer.getAttribute("data-url-imagenes");
 
-    if (window.marked) {
-        marked.setOptions({
-            breaks: true,
-            gfm: true
-        });
+// Identificador del documento en SQLite (null = documento nuevo sin persistir)
+const docIdInput = document.getElementById("docId");
+let currentDocId = docIdInput && docIdInput.value ? parseInt(docIdInput.value, 10) : null;
 
-        if (typeof markedFootnote === "function") {
-            marked.use(markedFootnote());
-        }
+/* ==============================================================================
+   SECCIÓN 2: CONTROL DE ESTADO, VERSIONES Y MUTEX ASÍNCRONO
+   ============================================================================== */
+// Variables de control contra condiciones de carrera (Race Conditions)
+let revision = 0;             // Contador incremental de cambios locales en el cliente
+let revisionGuardada = 0;     // Última versión confirmada y persistida en SQLite
+let hayCambiosSinGuardar = false; // Bandera booleana de estado sucio (dirty state)
+let guardandoEnProgreso = false;  // Cerrojo de exclusión mutua (Mutex) para llamadas HTTP
+
+/* ==============================================================================
+   SECCIÓN 3: CONFIGURACIÓN INICIAL DE LIBRERÍAS DE RENDERIZADO
+   ============================================================================== */
+// Configurar Marked.js para saltos de línea suaves y tablas tipo GitHub
+if (window.marked) {
+    marked.setOptions({
+        breaks: true,
+        gfm: true
+    });
+
+    // Registrar extensión para soporte de notas al pie de página [^1]
+    if (typeof markedFootnote === "function") {
+        marked.use(markedFootnote());
     }
+}
 
-// Inicializar Mermaid en modo seguro y estricto
-    if (window.mermaid) {
-        mermaid.initialize({
-            startOnLoad: false,
-            theme: 'default',
-            securityLevel: 'strict', // Blindaje contra inyección XSS
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif'
-        });
-    }
-    
-    function escaparHTML(texto) {
+// Configurar Mermaid.js en modo estricto para aislar la ejecución de scripts
+if (window.mermaid) {
+    mermaid.initialize({
+        startOnLoad: false, // Controlamos el renderizado manualmente por código
+        theme: 'default',
+        securityLevel: 'strict',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif'
+    });
+}
+
+/**
+ * Escapa caracteres HTML críticos para evitar inyección accidental
+ * cuando una librería como KaTeX falla y debe mostrarse el texto en crudo.
+ */
+function escaparHTML(texto) {
     return String(texto)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
-    }
+}
 
-    // Motor Token Shield: Aislamiento estricto y renderizado multietapa
-    function renderizarDocumento() {
-        const rawText = input.value;
-        let texto = rawText;
+/* ==============================================================================
+   SECCIÓN 4: MOTOR DE RENDERIZADO MULTIETAPA (TOKEN SHIELD V3)
+   ==============================================================================
+   Problema clásico: Si un usuario escribe código con signos '$' o Markdown dentro
+   de LaTeX, un parseador simple colisiona y rompe la salida.
+   Solución Token Shield: Se "secuestran" temporalmente los bloques delicados y se
+   reemplazan por tokens únicos con 'nonce' efímero. Una vez parseado el Markdown,
+   los tokens son devueltos a su lugar con su respectivo motor (KaTeX / Mermaid).
+   ============================================================================== */
+function renderizarDocumento() {
+    const rawText = input.value;
+    let texto = rawText;
 
-        // Generar un nonce único por render (blindaje contra colisiones)
-        const nonce = Math.random().toString(36).substring(2, 8);
+    // Generar un nonce dinámico por cada pasada de renderizado (blindaje contra colisiones)
+    const nonce = Math.random().toString(36).substring(2, 8);
 
-        // Arrays de almacenamiento aislado
-        const codeTokens = [];
-        let codeIndex = 0;
-        const mathTokens = [];
-        let mathIndex = 0;
-        const mermaidTokens = [];
-        let mermaidIndex = 0;
-        const escapedDollars = [];
-        let dollarIndex = 0;
-        const strikethroughTokens = [];
-        let strikeIndex = 0;
+    // Contenedores temporales para aislar el contenido protegido
+    const codeTokens = [];
+    let codeIndex = 0;
+    const mathTokens = [];
+    let mathIndex = 0;
+    const mermaidTokens = [];
+    let mermaidIndex = 0;
+    const escapedDollars = [];
+    let dollarIndex = 0;
+    const strikethroughTokens = [];
+    let strikeIndex = 0;
 
-        // Prefijos dinámicos efímeros vinculados al nonce
-   // Prefijos dinámicos unificados bajo el mismo nonce
-    const CODE_PREFIX   = `@@PCM_${nonce}_CODE_`;
-    const MATH_PREFIX   = `@@PCM_${nonce}_MATH_`;
+    // Prefijos efímeros garantizados para este ciclo específico
+    const CODE_PREFIX    = `@@PCM_${nonce}_CODE_`;
+    const MATH_PREFIX    = `@@PCM_${nonce}_MATH_`;
     const MERMAID_PREFIX = `@@PCM_${nonce}_MERMAID_`;
-    const DOLLAR_PREFIX = `@@PCM_${nonce}_DOLLAR_`;
-    const STRIKE_PREFIX = `@@PCM_${nonce}_STRIKE_`;
+    const DOLLAR_PREFIX  = `@@PCM_${nonce}_DOLLAR_`;
+    const STRIKE_PREFIX  = `@@PCM_${nonce}_STRIKE_`;
 
-        // 0. Diagramas Mermaid
-        texto = texto.replace(/(?:^|\n)[ \t]*```+mermaid[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```+[ \t]*(?:\n|$)/gi, (match, diagramCode) => {
-            const key = `${MERMAID_PREFIX}${mermaidIndex++}@@`;
-            mermaidTokens.push({ key, code: diagramCode.trim() });
-            return `\n\n${key}\n\n`;
-        });
+    // PASO 0: Extraer y aislar bloques Mermaid (```mermaid ... ```)
+    texto = texto.replace(/(?:^|\n)[ \t]*```+mermaid[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```+[ \t]*(?:\n|$)/gi, (match, diagramCode) => {
+        const key = `${MERMAID_PREFIX}${mermaidIndex++}@@`;
+        mermaidTokens.push({ key, code: diagramCode.trim() });
+        return `\n\n${key}\n\n`;
+    });
 
-        // 1. Bloques de código
-        texto = texto.replace(/(```[\s\S]*?```)/g, (match) => {
-            const key = `${CODE_PREFIX}BLOCK_${codeIndex++}@@`;
-            codeTokens.push({ key, val: match });
-            return key;
-        });
+    // PASO 1: Extraer bloques de código multilínea (```lang ... ```)
+    texto = texto.replace(/(```[\s\S]*?```)/g, (match) => {
+        const key = `${CODE_PREFIX}BLOCK_${codeIndex++}@@`;
+        codeTokens.push({ key, val: match });
+        return key;
+    });
 
-        // 1.1 Código inline
-        texto = texto.replace(/(?<!`)(`+)(.+?)(?<!`)\1(?!`)/g, (match) => {
-            const key = `${CODE_PREFIX}INLINE_${codeIndex++}@@`;
-            codeTokens.push({ key, val: match });
-            return key;
-        });
+    // PASO 1.1: Extraer código inline (`...`)
+    texto = texto.replace(/(?<!`)(`+)(.+?)(?<!`)\1(?!`)/g, (match) => {
+        const key = `${CODE_PREFIX}INLINE_${codeIndex++}@@`;
+        codeTokens.push({ key, val: match });
+        return key;
+    });
 
-        // 2. Dólares literales escapados (\$)
-        texto = texto.replace(/\\\$/g, () => {
+    // PASO 2: Extraer signos de dólar escapados literalmente por el usuario (\$)
+    texto = texto.replace(/\\\$/g, () => {
         const key = `${DOLLAR_PREFIX}${dollarIndex++}@@`;
         escapedDollars.push({ key, val: "$" });
         return key;
-        });
+    });
 
-        // 3. Salto de página manual para PDF
-        texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');          // 4. Bloques matemáticos explícitos ($$ y \[)
-        texto = texto.replace(/\$\$([\s\S]*?)\$\$/g, (match, expr) => {
-            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
-            mathTokens.push({ key, expr, display: true });
-            return `\n\n${key}\n\n`;
-        });
+    // PASO 3: Convertir comandos \newpage en separadores de hoja para exportación PDF
+    texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');
 
-        texto = texto.replace(/(?:^|\n)[ \t]*\\\[([\s\S]*?)\\\][ \t]*(?:\n|$)/g, (match, expr) => {
-            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
-            mathTokens.push({ key, expr, display: true });
-            return `\n\n${key}\n\n`;
-        });
+    // PASO 4: Extraer fórmulas matemáticas en bloque ($$...$$ y \[...\])
+    texto = texto.replace(/\$\$([\s\S]*?)\$\$/g, (match, expr) => {
+        const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
+        mathTokens.push({ key, expr, display: true });
+        return `\n\n${key}\n\n`;
+    });
 
-        // 4.5 Entornos LaTeX huérfanos con retroreferencia \2
-        texto = texto.replace(/(?:^|\n)[ \t]*(\\begin\{(align\*?|gather\*?|aligned|matrix|pmatrix|bmatrix|vmatrix|cases|equation\*?)\}[\s\S]*?\\end\{\2\})[ \t]*(?:\n|$)/g, (match, expr) => {
-            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
-            mathTokens.push({ key, expr, display: true });
-            return `\n\n${key}\n\n`;
-        });
+    texto = texto.replace(/(?:^|\n)[ \t]*\\\[([\s\S]*?)\\\][ \t]*(?:\n|$)/g, (match, expr) => {
+        const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
+        mathTokens.push({ key, expr, display: true });
+        return `\n\n${key}\n\n`;
+    });
 
-        // 5. Fórmulas inline (\( y $)
-        texto = texto.replace(/\\\(([\s\S]*?)\\\)/g, (match, expr) => {
-            const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
-            mathTokens.push({ key, expr, display: false });
-            return key;
-        });
+    // PASO 4.5: Extraer entornos LaTeX huérfanos con retroreferencia estricta (\2)
+    texto = texto.replace(/(?:^|\n)[ \t]*(\\begin\{(align\*?|gather\*?|aligned|matrix|pmatrix|bmatrix|vmatrix|cases|equation\*?)\}[\s\S]*?\\end\{\2\})[ \t]*(?:\n|$)/g, (match, expr) => {
+        const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
+        mathTokens.push({ key, expr, display: true });
+        return `\n\n${key}\n\n`;
+    });
 
-        texto = texto.replace(/(?<![\$\w\\])\$([^\s\$\n](?:[^\$\n]*?[^\s\$\n])?)\$(?![\$\w])/g, (match, expr) => {
-            const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
-            mathTokens.push({ key, expr, display: false });
-            return key;
-        });
+    // PASO 5: Extraer fórmulas matemáticas inline ($...$ y \(...\))
+    texto = texto.replace(/\\\(([\s\S]*?)\\\)/g, (match, expr) => {
+        const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
+        mathTokens.push({ key, expr, display: false });
+        return key;
+    });
 
-        // 5.5 Formateo extendido, A. Aislar tachado GFM (~~...~~)
-        texto = texto.replace(/~~([^\s~](?:[\s\S]*?[^\s~])?)~~/g, (match, contenido) => {
+    texto = texto.replace(/(?<![\$\w\\])\$([^\s\$\n](?:[^\$\n]*?[^\s\$\n])?)\$(?![\$\w])/g, (match, expr) => {
+        const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
+        mathTokens.push({ key, expr, display: false });
+        return key;
+    });
+
+    // PASO 5.5: Tipografía extendida (Tachado, Resaltado, Subíndices y Superíndices)
+    // Se aísla el tachado GFM (~~) para que los subíndices (~) no destruyan sus pares
+    texto = texto.replace(/~~([^\s~](?:[\s\S]*?[^\s~])?)~~/g, (match, contenido) => {
         const key = `${STRIKE_PREFIX}${strikeIndex++}@@`;
         strikethroughTokens.push({ key, val: `<del>${contenido}</del>` });
         return key;
-        });
+    });
 
-        texto = texto.replace(/(?<!=)==([^\s=](?:[^=\n]*?[^\s=])?)==(?!=)/g, '<mark>$1</mark>');
-        texto = texto.replace(/(?<!~)~([^\s~]+?)~(?!~)/g, '<sub>$1</sub>');
-        texto = texto.replace(/(?<!\^)\^([^\s\^]+?)\^(?!\^)/g, '<sup>$1</sup>');
+    texto = texto.replace(/(?<!=)==([^\s=](?:[^=\n]*?[^\s=])?)==(?!=)/g, '<mark>$1</mark>');
+    texto = texto.replace(/(?<!~)~([^\s~]+?)~(?!~)/g, '<sub>$1</sub>');
+    texto = texto.replace(/(?<!\^)\^([^\s\^]+?)\^(?!\^)/g, '<sup>$1</sup>');
 
-        // Restauración de tachados GFM
-        strikethroughTokens.forEach(item => {
-            texto = texto.replace(item.key, () => item.val);
-        });
+    // Restaurar tachados GFM procesados
+    strikethroughTokens.forEach(item => {
+        texto = texto.replace(item.key, () => item.val);
+    });
 
-        // 6. Restauración segura de bloques y caracteres especiales
-        codeTokens.forEach(item => {
-            texto = texto.replace(item.key, () => item.val);
-        });
+    // PASO 6: Restaurar los bloques de código y dólares antes de pasarlo a Marked
+    codeTokens.forEach(item => {
+        texto = texto.replace(item.key, () => item.val);
+    });
 
-        escapedDollars.forEach(item => {
-            texto = texto.replace(item.key, () => item.val);
-        });
+    escapedDollars.forEach(item => {
+        texto = texto.replace(item.key, () => item.val);
+    });
 
-        // 7. Parsear Markdown y Sanitizar con DOMPurify
-        let parsedHtml = marked.parse(texto);
-        let safeHtml = DOMPurify.sanitize(parsedHtml, {
-            ADD_TAGS: ['div', 'span', 'p', 'img', 'sub', 'sup', 'mark', 'kbd', 'details', 'summary'],
-            ADD_ATTR: ['width', 'height', 'align', 'class', 'open']
-        });
+    // PASO 7: Compilar Markdown a HTML y sanitizar con DOMPurify
+    // Se conservan estilos inline permitidos para uso en entorno seguro LAN
+    let parsedHtml = marked.parse(texto);
+    let safeHtml = DOMPurify.sanitize(parsedHtml, {
+        ADD_TAGS: ['div', 'span', 'p', 'img', 'sub', 'sup', 'mark', 'kbd', 'details', 'summary'],
+        ADD_ATTR: ['width', 'height', 'align', 'class', 'open', 'style']
+    });
 
-        // 8. Inyectar KaTeX tolerante a fallos y blindado contra XSS
-        mathTokens.forEach(tok => {
-            let rendered = "";
-            try {
-                rendered = katex.renderToString(tok.expr.trim(), {
-                    displayMode: tok.display,
-                    throwOnError: false
-                });
-            } catch (err) {
-                // tok.expr NUNCA debe inyectarse crudo en el HTML
-                rendered = `<span class="katex-error">${escaparHTML(tok.expr)}</span>`;
-            }
-
-            const bloqueKaTeX = tok.display ? `<div class="katex-display-wrapper">${rendered}</div>` : rendered;
-            const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
-
-            if (tok.display && pWrapper.test(safeHtml)) {
-                safeHtml = safeHtml.replace(pWrapper, () => bloqueKaTeX);
-            } else {
-                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueKaTeX);
-            }
-        });
-
-        // 9. Inyectar Mermaid
-        mermaidTokens.forEach(tok => {
-            const codigoEscapado = tok.code
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;");
-
-            const bloqueMermaid = `<div class="mermaid-diagram-wrapper"><div class="mermaid">${codigoEscapado}</div></div>`;
-            const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
-
-            if (pWrapper.test(safeHtml)) {
-                safeHtml = safeHtml.replace(pWrapper, () => bloqueMermaid);
-            } else {
-                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueMermaid);
-            }
-        });
-
-        output.innerHTML = safeHtml;
-
-        // 10. Compilar diagramas Mermaid en el DOM
-        if (window.mermaid && mermaidTokens.length > 0) {
-            try {
-                const nodos = output.querySelectorAll('.mermaid');
-                if (typeof mermaid.run === "function") {
-                    mermaid.run({ nodes: nodos }).catch(err => {
-                        console.warn("Fallo al compilar diagrama Mermaid:", err);
-                    });
-                } else if (typeof mermaid.init === "function") {
-                    mermaid.init(undefined, nodos);
-                }
-            } catch (err) {
-                console.warn("Error en ejecución de Mermaid:", err);
-            }
+    // PASO 8: Reemplazar tokens matemáticos con el render vectorial de KaTeX
+    mathTokens.forEach(tok => {
+        let rendered = "";
+        try {
+            rendered = katex.renderToString(tok.expr.trim(), {
+                displayMode: tok.display,
+                throwOnError: false
+            });
+        } catch (err) {
+            rendered = `<span class="katex-error">${escaparHTML(tok.expr)}</span>`;
         }
 
-        const palabras = rawText.trim() === "" ? 0 : rawText.trim().split(/\s+/).length;
-        actualizarMetricas(palabras, rawText.length);
+        const bloqueKaTeX = tok.display ? `<div class="katex-display-wrapper">${rendered}</div>` : rendered;
+        const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+
+        // Si el token quedó envuelto dentro de un <p>, lo desenrollamos para no romper el HTML
+        if (tok.display && pWrapper.test(safeHtml)) {
+            safeHtml = safeHtml.replace(pWrapper, () => bloqueKaTeX);
+        } else {
+            safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueKaTeX);
+        }
+    });
+
+    // PASO 9: Inyectar contenedores de Mermaid en los tokens correspondientes
+    mermaidTokens.forEach(tok => {
+        const codigoEscapado = tok.code
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+
+        const bloqueMermaid = `<div class="mermaid-diagram-wrapper"><div class="mermaid">${codigoEscapado}</div></div>`;
+        const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+
+        if (pWrapper.test(safeHtml)) {
+            safeHtml = safeHtml.replace(pWrapper, () => bloqueMermaid);
+        } else {
+            safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueMermaid);
+        }
+    });
+
+    // Aplicar el árbol HTML procesado en la hoja de previsualización
+    output.innerHTML = safeHtml;
+
+    // PASO 10: Disparar compilación vectorial de diagramas Mermaid
+    if (window.mermaid && mermaidTokens.length > 0) {
+        try {
+            const nodos = output.querySelectorAll('.mermaid');
+            // Limpiar marca previa para obligar a Mermaid a re-renderizar cambios en vivo
+            nodos.forEach(el => el.removeAttribute('data-processed'));
+
+            if (typeof mermaid.run === "function") {
+                mermaid.run({ nodes: nodos }).catch(err => {
+                    console.warn("Fallo al compilar diagrama Mermaid:", err);
+                });
+            } else if (typeof mermaid.init === "function") {
+                mermaid.init(undefined, nodos);
+            }
+        } catch (err) {
+            console.warn("Error en ejecución de Mermaid:", err);
+        }
     }
 
-    function actualizarMetricas(palabras, caracteres) {
-        docStats.textContent = `${palabras.toLocaleString()} palabras · ${caracteres.toLocaleString()} caracteres`;
-    }
+    // Actualizar conteo en vivo de palabras y caracteres
+    const palabras = rawText.trim() === "" ? 0 : rawText.trim().split(/\s+/).length;
+    actualizarMetricas(palabras, rawText.length);
+}
 
-    function marcarModificado() {
+/* ==============================================================================
+   SECCIÓN 5: MÉTRICAS EN VIVO Y CONTROL DE ENTRADA (DEBOUNCE)
+   ============================================================================== */
+function actualizarMetricas(palabras, caracteres) {
+    docStats.textContent = `${palabras.toLocaleString()} palabras · ${caracteres.toLocaleString()} caracteres`;
+}
+
+/**
+ * Registra que el documento fue alterado respecto a la versión en base de datos.
+ */
+function marcarModificado() {
     revision++;
     hayCambiosSinGuardar = true;
     saveStatus.textContent = "🟡 Sin guardar";
     saveStatus.className = "save-status-badge status-unsaved";
-    }
+}
 
-    // Amortiguador de renderizado (Debounce) para evitar tirones al escribir rápido
-    let debounceTimer = null;
-    input.addEventListener("input", () => {
-        marcarModificado();
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-            renderizarDocumento();
-        }, 70);
-    });
-
-    tituloInput.addEventListener("input", marcarModificado);
-
-    // ==========================================
-    // SUBIDA Y GESTIÓN DE IMÁGENES (QoL)
-    // ==========================================
-
-    function insertarTextoEnCursor(texto) {
-        const start = input.selectionStart;
-        const end = input.selectionEnd;
-        const contenido = input.value;
-        input.value = contenido.substring(0, start) + texto + contenido.substring(end);
-        input.selectionStart = input.selectionEnd = start + texto.length;
-        marcarModificado();
+// Amortiguador (Debounce) de 70ms: evita recalcular el render en cada pulsación ultrarrápida
+let debounceTimer = null;
+input.addEventListener("input", () => {
+    marcarModificado();
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
         renderizarDocumento();
-        input.focus();
-    }
+    }, 70);
+});
 
-    async function subirArchivoImagen(file) {
-        if (!file || !file.type.startsWith("image/")) {
-            alert("Por favor selecciona un archivo de imagen válido.");
-            return;
-        }
+tituloInput.addEventListener("input", marcarModificado);
 
-        saveStatus.textContent = "⏳ Subiendo imagen...";
-        saveStatus.className = "save-status-badge status-saving";
+/* ==============================================================================
+   SECCIÓN 6: PERSISTENCIA Y GUARDADO ASÍNCRONO EN SQLITE
+   ============================================================================== */
+async function guardarDocumento() {
+    // Candado activo: si ya hay un guardado en tránsito por la red, se ignora la petición
+    if (guardandoEnProgreso) return;
 
-        const formData = new FormData();
-        formData.append("imagen", file);
+    guardandoEnProgreso = true;
+    const revisionEnviada = revision; // Instantánea de la versión enviada
+    saveStatus.textContent = "⏳ Guardando...";
+    saveStatus.className = "save-status-badge status-saving";
 
-        try {
-            const resp = await fetch(URL_SUBIR_IMG, {
-                method: "POST",
-                body: formData
-            });
+    try {
+        const res = await fetch("{{ url_for('clips.api_guardar_documento') }}", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                id: currentDocId,
+                titulo: tituloInput.value.trim() || "Documento sin título",
+                contenido: input.value
+            })
+        });
 
-            const data = await resp.json();
-            if (data.ok) {
-            // 1. Vincular el ID retornado por Flask (vital para documentos nuevos)
+        const data = await res.json();
+
+        if (data.ok) {
+            // 1. En documentos nuevos, Flask devuelve el nuevo ID generado en SQLite
             if (data.id) {
                 currentDocId = data.id;
-                if (docIdInput) {
-                    docIdInput.value = data.id;
-                }
+                if (docIdInput) docIdInput.value = data.id;
             }
 
-            // 2. Control de carreras asíncronas
+            // 2. Comprobación reactiva: ¿el usuario escribió mientras el paquete viajaba?
             revisionGuardada = revisionEnviada;
 
             if (revision === revisionGuardada) {
@@ -426,393 +513,440 @@
                 saveStatus.textContent = "🟢 Guardado";
                 saveStatus.className = "save-status-badge status-saved";
             } else {
+                // Hay modificaciones pendientes producidas durante la latencia
                 hayCambiosSinGuardar = true;
                 saveStatus.textContent = "🟡 Sin guardar";
                 saveStatus.className = "save-status-badge status-unsaved";
             }
-        }
-        } catch (err) {
-            console.error(err);
-            alert("Error de conexión al subir la imagen.");
-            saveStatus.textContent = "🔴 Error de red";
+        } else {
+            saveStatus.textContent = "🔴 Error al guardar";
             saveStatus.className = "save-status-badge status-error";
+            alert(data.error || "No se pudo guardar el documento.");
         }
+    } catch (err) {
+        saveStatus.textContent = "🔴 Error de red";
+        saveStatus.className = "save-status-badge status-error";
+    } finally {
+        // Se libera el candado incondicionalmente en el bloque finally
+        guardandoEnProgreso = false;
+    }
+}
+
+/* ==============================================================================
+   SECCIÓN 7: GESTIÓN DE ARCHIVOS MULTIMEDIA (SUBIDA, CLIPBOARD, DRAG & DROP)
+   ============================================================================== */
+function insertarTextoEnCursor(texto) {
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    const contenido = input.value;
+    input.value = contenido.substring(0, start) + texto + contenido.substring(end);
+    input.selectionStart = input.selectionEnd = start + texto.length;
+    marcarModificado();
+    renderizarDocumento();
+    input.focus();
+}
+
+async function subirArchivoImagen(file) {
+    if (!file || !file.type.startsWith("image/")) {
+        alert("Por favor selecciona un archivo de imagen válido.");
+        return;
     }
 
-    // 1. Pegado directo de imágenes (Ctrl + V)
-    input.addEventListener("paste", (e) => {
-        const items = (e.clipboardData || window.clipboardData).items;
-        for (let item of items) {
-            if (item.type.indexOf("image") !== -1) {
-                const blob = item.getAsFile();
-                e.preventDefault();
-                subirArchivoImagen(blob);
-                break;
+    saveStatus.textContent = "⏳ Subiendo imagen...";
+    saveStatus.className = "save-status-badge status-saving";
+
+    const formData = new FormData();
+    formData.append("imagen", file);
+
+    try {
+        const resp = await fetch(URL_SUBIR_IMG, {
+            method: "POST",
+            body: formData
+        });
+
+        const data = await resp.json();
+        if (data.ok) {
+            if (data.id) {
+                currentDocId = data.id;
+                if (docIdInput) docIdInput.value = data.id;
             }
-        }
-    });
-
-    // 2. Drag & Drop sobre el editor
-    input.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        input.classList.add("textarea-dragover");
-    });
-
-    input.addEventListener("dragleave", () => {
-        input.classList.remove("textarea-dragover");
-    });
-
-    input.addEventListener("drop", (e) => {
-        e.preventDefault();
-        input.classList.remove("textarea-dragover");
-        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            const file = e.dataTransfer.files[0];
-            if (file.type.startsWith("image/")) {
-                subirArchivoImagen(file);
+            saveStatus.textContent = "🟢 Listo";
+            saveStatus.className = "save-status-badge status-saved";
+            // Si la subida devolvió la URL de la imagen, la insertamos de inmediato
+            if (data.url && data.nombre) {
+                insertarTextoEnCursor(`\n\n![${data.nombre}](${data.url})\n\n`);
             }
-        }
-    });
-
-    // 3. Subida manual desde explorador
-    function seleccionarArchivoImagen() {
-        fileInputImagen.click();
-    }
-
-    fileInputImagen.addEventListener("change", () => {
-        if (fileInputImagen.files && fileInputImagen.files[0]) {
-            subirArchivoImagen(fileInputImagen.files[0]);
-            cerrarModalImagenes();
-            fileInputImagen.value = "";
-        }
-    });
-
-    // 4. Modal de galería
-    async function abrirModalImagenes() {
-        modalImagenes.style.display = "flex";
-        document.body.style.overflow = "hidden";
-        contenedorGaleria.innerHTML = '<p class="gallery-loading">Cargando imágenes del servidor...</p>';
-
-        try {
-            const resp = await fetch(URL_LISTAR_IMG);
-            const data = await resp.json();
-
-            if (data.ok && data.imagenes.length > 0) {
-                contenedorGaleria.innerHTML = "";
-                data.imagenes.forEach(img => {
-                    const card = document.createElement("div");
-                    card.className = "gallery-item";
-
-                    const imgEl = document.createElement("img");
-                    imgEl.src = img.url;
-                    imgEl.alt = img.nombre;
-                    imgEl.loading = "lazy";
-
-                    const infoDiv = document.createElement("div");
-                    infoDiv.className = "gallery-item-info";
-
-                    const nameSpan = document.createElement("span");
-                    nameSpan.className = "gallery-item-name";
-                    nameSpan.title = img.nombre;
-                    nameSpan.textContent = img.nombre;
-
-                    const actionsDiv = document.createElement("div");
-                    actionsDiv.className = "gallery-item-actions";
-
-                    const btnInsert = document.createElement("button");
-                    btnInsert.type = "button";
-                    btnInsert.className = "btn-insert-img";
-                    btnInsert.textContent = "➕ Insertar";
-                    btnInsert.addEventListener("click", () => {
-                        insertarImagenSeleccionada(img.url, img.nombre);
-                    });
-
-                    const btnDelete = document.createElement("button");
-                    btnDelete.type = "button";
-                    btnDelete.className = "btn-delete-img";
-                    btnDelete.title = "Eliminar imagen del disco";
-                    btnDelete.textContent = "🗑️";
-                    btnDelete.addEventListener("click", () => {
-                        eliminarImagenGaleria(img.nombre);
-                    });
-
-                    actionsDiv.appendChild(btnInsert);
-                    actionsDiv.appendChild(btnDelete);
-                    infoDiv.appendChild(nameSpan);
-                    infoDiv.appendChild(actionsDiv);
-                    card.appendChild(imgEl);
-                    card.appendChild(infoDiv);
-
-                    contenedorGaleria.appendChild(card);
-                });
-            } 
-            else {
-                contenedorGaleria.innerHTML = '<p class="gallery-loading">No hay imágenes subidas todavía en el servidor.</p>';
-            }
-        } catch (err) {
-            contenedorGaleria.innerHTML = '<p class="gallery-loading">Error al cargar la lista de imágenes.</p>';
-        }
-    }
-
-    function insertarImagenSeleccionada(url, nombre) {
-        insertarTextoEnCursor(`\n\n![${nombre}](${url})\n\n`);
-        cerrarModalImagenes();
-    }
-
-    function cerrarModalImagenes() {
-        modalImagenes.style.display = "none";
-        document.body.style.overflow = "";
-    }
-
-    window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && modalImagenes.style.display === "flex") {
-            cerrarModalImagenes();
-        }
-    });
-
-    modalImagenes.addEventListener("click", (e) => {
-        if (e.target === modalImagenes) {
-            cerrarModalImagenes();
-        }
-    });
-
-    // ==========================================
-    // GUARDADO ASÍNCRONO EN SQLITE
-    // ==========================================
-let guardandoEnProgreso = false;
-
-async function guardarDocumento() {
-        // Candado activo: evita peticiones cruzadas en LAN / WiFi
-        if (guardandoEnProgreso) return;
-
-        guardandoEnProgreso = true;
-        const revisionEnviada = revision;
-        saveStatus.textContent = "⏳ Guardando...";
-        saveStatus.className = "save-status-badge status-saving";
-
-        try {
-            const res = await fetch("{{ url_for('clips.api_guardar_documento') }}", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    id: currentDocId,
-                    titulo: tituloInput.value.trim() || "Documento sin título",
-                    contenido: input.value
-                })
-            });
-
-            const data = await res.json();
-
-            if (data.ok) {
-                // 1. Restaurar persistencia de ID retornado (evita duplicar docs nuevos)
-                if (data.id) {
-                    currentDocId = data.id;
-                    if (docIdInput) {
-                        docIdInput.value = data.id;
-                    }
-                }
-
-                // 2. Control de estado reactivo
-                revisionGuardada = revisionEnviada;
-
-                if (revision === revisionGuardada) {
-                    hayCambiosSinGuardar = false;
-                    saveStatus.textContent = "🟢 Guardado";
-                    saveStatus.className = "save-status-badge status-saved";
-                } else {
-                    hayCambiosSinGuardar = true;
-                    saveStatus.textContent = "🟡 Sin guardar";
-                    saveStatus.className = "save-status-badge status-unsaved";
-                }
-            } else {
-                saveStatus.textContent = "🔴 Error al guardar";
-                saveStatus.className = "save-status-badge status-error";
-                alert(data.error || "No se pudo guardar el documento.");
-            }
-        } catch (err) {
-            saveStatus.textContent = "🔴 Error de red";
+        } else {
+            saveStatus.textContent = "🔴 Error al subir";
             saveStatus.className = "save-status-badge status-error";
-        } finally {
-            // Se libera el cerrojo siempre, incluso si falló la red
-            guardandoEnProgreso = false;
+            alert(data.error || "No se pudo subir la imagen.");
         }
+    } catch (err) {
+        console.error(err);
+        alert("Error de conexión al subir la imagen.");
+        saveStatus.textContent = "🔴 Error de red";
+        saveStatus.className = "save-status-badge status-error";
     }
+}
 
-    // Atajo global Ctrl + S
-    window.addEventListener("keydown", (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+// 1. Pegado directo desde el portapapeles (Ctrl + V)
+input.addEventListener("paste", (e) => {
+    const items = (e.clipboardData || window.clipboardData).items;
+    for (let item of items) {
+        if (item.type.indexOf("image") !== -1) {
+            const blob = item.getAsFile();
             e.preventDefault();
-            guardarDocumento();
+            subirArchivoImagen(blob);
+            break;
         }
-    });
+    }
+});
 
-    // ==========================================
-    // SINCRONIZACIÓN POR CLIC BIDIRECCIONAL
-    // ==========================================
-    output.addEventListener("click", (e) => {
-        const elemento = e.target.closest("h1, h2, h3, h4, h5, p, li, tr, blockquote, pre, .mermaid-diagram-wrapper");
-        if (!elemento) return;
+// 2. Soporte para arrastrar y soltar archivos sobre el textarea (Drag & Drop)
+input.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    input.classList.add("textarea-dragover");
+});
 
-        let textoBuscado = elemento.innerText.trim();
-        if (!textoBuscado) return;
+input.addEventListener("dragleave", () => {
+    input.classList.remove("textarea-dragover");
+});
 
-        const palabras = textoBuscado.split(/\s+/).slice(0, 4).join(" ");
-        const raw = input.value;
-        let posicion = raw.indexOf(palabras);
-
-        if (posicion === -1) {
-            posicion = raw.indexOf(textoBuscado.substring(0, 15));
+input.addEventListener("drop", (e) => {
+    e.preventDefault();
+    input.classList.remove("textarea-dragover");
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        const file = e.dataTransfer.files[0];
+        if (file.type.startsWith("image/")) {
+            subirArchivoImagen(file);
         }
+    }
+});
 
-        if (posicion !== -1) {
-            input.focus();
-            input.setSelectionRange(posicion, posicion);
+// 3. Subida tradicional desde el explorador de Windows
+function seleccionarArchivoImagen() {
+    fileInputImagen.click();
+}
 
-            const lineasHastaAhi = raw.substring(0, posicion).split("\n").length;
-            const lineasTotales = raw.split("\n").length;
-            const proporcion = lineasHastaAhi / lineasTotales;
-            input.scrollTop = (proporcion * input.scrollHeight) - (input.clientHeight / 3);
+fileInputImagen.addEventListener("change", () => {
+    if (fileInputImagen.files && fileInputImagen.files[0]) {
+        subirArchivoImagen(fileInputImagen.files[0]);
+        cerrarModalImagenes();
+        fileInputImagen.value = "";
+    }
+});
+
+// 4. Modal de Galería de Imágenes
+async function abrirModalImagenes() {
+    modalImagenes.style.display = "flex";
+    document.body.style.overflow = "hidden";
+    contenedorGaleria.innerHTML = '<p class="gallery-loading">Cargando imágenes del servidor...</p>';
+
+    try {
+        const resp = await fetch(URL_LISTAR_IMG);
+        const data = await resp.json();
+
+        if (data.ok && data.imagenes.length > 0) {
+            contenedorGaleria.innerHTML = "";
+            data.imagenes.forEach(img => {
+                const card = document.createElement("div");
+                card.className = "gallery-item";
+
+                const imgEl = document.createElement("img");
+                imgEl.src = img.url;
+                imgEl.alt = img.nombre;
+                imgEl.loading = "lazy";
+
+                const infoDiv = document.createElement("div");
+                infoDiv.className = "gallery-item-info";
+
+                const nameSpan = document.createElement("span");
+                nameSpan.className = "gallery-item-name";
+                nameSpan.title = img.nombre;
+                nameSpan.textContent = img.nombre;
+
+                const actionsDiv = document.createElement("div");
+                actionsDiv.className = "gallery-item-actions";
+
+                const btnInsert = document.createElement("button");
+                btnInsert.type = "button";
+                btnInsert.className = "btn-insert-img";
+                btnInsert.textContent = "➕ Insertar";
+                btnInsert.addEventListener("click", () => {
+                    insertarImagenSeleccionada(img.url, img.nombre);
+                });
+
+                const btnDelete = document.createElement("button");
+                btnDelete.type = "button";
+                btnDelete.className = "btn-delete-img";
+                btnDelete.title = "Eliminar imagen del disco";
+                btnDelete.textContent = "🗑️";
+                btnDelete.addEventListener("click", () => {
+                    eliminarImagenGaleria(img.nombre);
+                });
+
+                actionsDiv.appendChild(btnInsert);
+                actionsDiv.appendChild(btnDelete);
+                infoDiv.appendChild(nameSpan);
+                infoDiv.appendChild(actionsDiv);
+                card.appendChild(imgEl);
+                card.appendChild(infoDiv);
+
+                contenedorGaleria.appendChild(card);
+            });
+        } else {
+            contenedorGaleria.innerHTML = '<p class="gallery-loading">No hay imágenes subidas todavía en el servidor.</p>';
         }
-    });
+    } catch (err) {
+        contenedorGaleria.innerHTML = '<p class="gallery-loading">Error al cargar la lista de imágenes.</p>';
+    }
+}
 
-    input.addEventListener("click", () => {
-        const cursorPos = input.selectionStart;
-        const textoPrevio = input.value.substring(0, cursorPos);
-        const lineas = input.value.split("\n");
-        const lineaActual = textoPrevio.split("\n").length - 1;
+function insertarImagenSeleccionada(url, nombre) {
+    insertarTextoEnCursor(`\n\n![${nombre}](${url})\n\n`);
+    cerrarModalImagenes();
+}
 
-        let muestra = lineas[lineaActual]?.trim();
-        if (!muestra) {
-            for (let i = lineaActual - 1; i >= 0; i--) {
-                if (lineas[i].trim()) {
-                    muestra = lineas[i].trim();
-                    break;
-                }
-            }
+function cerrarModalImagenes() {
+    modalImagenes.style.display = "none";
+    document.body.style.overflow = "";
+}
+
+async function eliminarImagenGaleria(nombreArchivo) {
+    if (!confirm(`¿Eliminar definitivamente «${nombreArchivo}» del servidor?`)) {
+        return;
+    }
+
+    try {
+        const resp = await fetch(`/documentos/api/eliminar_imagen/${encodeURIComponent(nombreArchivo)}`, {
+            method: "POST"
+        });
+        const data = await resp.json();
+
+        if (data.ok) {
+            abrirModalImagenes();
+        } else {
+            alert(data.error || "No se pudo eliminar la imagen.");
         }
+    } catch (err) {
+        console.error(err);
+        alert("Error de conexión al eliminar la imagen.");
+    }
+}
 
-        if (!muestra) return;
+/* ==============================================================================
+   SECCIÓN 8: SINCRONIZACIÓN POR CLIC BIDIRECCIONAL (EDITOR ↔ VISTA PREVIA)
+   ============================================================================== */
+// Clic en la vista previa -> Localiza y posiciona el cursor en el textarea
+output.addEventListener("click", (e) => {
+    const elemento = e.target.closest("h1, h2, h3, h4, h5, p, li, tr, blockquote, pre, .mermaid-diagram-wrapper");
+    if (!elemento) return;
 
-        let textoLimpio = muestra.replace(/^[#\-*>\d\.\s]+/, "").replace(/[`*$_]/g, "").trim();
-        if (textoLimpio.length > 25) textoLimpio = textoLimpio.substring(0, 25);
-        if (textoLimpio.length < 3) return;
+    let textoBuscado = elemento.innerText.trim();
+    if (!textoBuscado) return;
 
-        const elementos = output.querySelectorAll("h1, h2, h3, h4, h5, p, li, blockquote, pre, td, th, .mermaid-diagram-wrapper");
-        for (let el of elementos) {
-            if (el.innerText && el.innerText.includes(textoLimpio)) {
-                el.scrollIntoView({ behavior: "smooth", block: "center" });
-                el.classList.add("sync-flash");
-                setTimeout(() => el.classList.remove("sync-flash"), 1200);
+    const palabras = textoBuscado.split(/\s+/).slice(0, 4).join(" ");
+    const raw = input.value;
+    let posicion = raw.indexOf(palabras);
+
+    if (posicion === -1) {
+        posicion = raw.indexOf(textoBuscado.substring(0, 15));
+    }
+
+    if (posicion !== -1) {
+        input.focus();
+        input.setSelectionRange(posicion, posicion);
+
+        const lineasHastaAhi = raw.substring(0, posicion).split("\n").length;
+        const lineasTotales = raw.split("\n").length;
+        const proporcion = lineasHastaAhi / lineasTotales;
+        input.scrollTop = (proporcion * input.scrollHeight) - (input.clientHeight / 3);
+    }
+});
+
+// Clic en el textarea -> Desplaza y resalta visualmente el bloque en la vista previa
+input.addEventListener("click", () => {
+    const cursorPos = input.selectionStart;
+    const textoPrevio = input.value.substring(0, cursorPos);
+    const lineas = input.value.split("\n");
+    const lineaActual = textoPrevio.split("\n").length - 1;
+
+    let muestra = lineas[lineaActual]?.trim();
+    if (!muestra) {
+        for (let i = lineaActual - 1; i >= 0; i--) {
+            if (lineas[i].trim()) {
+                muestra = lineas[i].trim();
                 break;
             }
         }
-    });
+    }
 
-    function insertarSaltoPagina() {
+    if (!muestra) return;
+
+    let textoLimpio = muestra.replace(/^[#\-*>\d\.\s]+/, "").replace(/[`*$_]/g, "").trim();
+    if (textoLimpio.length > 25) textoLimpio = textoLimpio.substring(0, 25);
+    if (textoLimpio.length < 3) return;
+
+    const elementos = output.querySelectorAll("h1, h2, h3, h4, h5, p, li, blockquote, pre, td, th, .mermaid-diagram-wrapper");
+    for (let el of elementos) {
+        if (el.innerText && el.innerText.includes(textoLimpio)) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            el.classList.add("sync-flash");
+            setTimeout(() => el.classList.remove("sync-flash"), 1200);
+            break;
+        }
+    }
+});
+
+/* ==============================================================================
+   SECCIÓN 9: UTILIDADES GENERALES Y EXPORTACIÓN
+   ============================================================================== */
+function insertarSaltoPagina() {
     insertarTextoEnCursor("\n\n\\newpage\n\n");
+}
+
+function exportarPDF() {
+    if (!input.value.trim()) {
+        alert("Escribe o pega contenido antes de exportar.");
+        return;
     }
+    window.print();
+}
 
-    document.addEventListener("DOMContentLoaded", () => {
-        localStorage.removeItem("pcm_doc_draft");
-        renderizarDocumento();
-    });
-
-    function exportarPDF() {
-        if (!input.value.trim()) {
-            alert("Escribe o pega contenido antes de exportar.");
-            return;
-        }
-        window.print();
+function copiarMarkdown(btn) {
+    if (input.value.trim() && window.copiarTextoUniversal) {
+        window.copiarTextoUniversal(input.value, btn);
     }
+}
 
-    function copiarMarkdown(btn) {
-        if (input.value.trim() && window.copiarTextoUniversal) {
-            window.copiarTextoUniversal(input.value, btn);
-        }
-    }
-
-    function limpiarEditor() {
-        if (confirm("¿Vaciar el documento actual?")) {
-            input.value = "";
-            tituloInput.value = "";
-            if (!currentDocId) {
-                localStorage.removeItem("pcm_doc_draft");
-            }
-            marcarModificado();
-            renderizarDocumento();
-            input.focus();
-        }
-    }
-
-    async function eliminarImagenGaleria(nombreArchivo) {
-        if (!confirm(`¿Eliminar definitivamente «${nombreArchivo}» del servidor?`)) {
-            return;
-        }
-
-        try {
-            const resp = await fetch(`/documentos/api/eliminar_imagen/${encodeURIComponent(nombreArchivo)}`, {
-                method: "POST"
-            });
-            const data = await resp.json();
-
-            if (data.ok) {
-                abrirModalImagenes();
-            } else {
-                alert(data.error || "No se pudo eliminar la imagen.");
-            }
-        } catch (err) {
-            console.error(err);
-            alert("Error de conexión al eliminar la imagen.");
-        }
-    }
-
-    function insertarEjemploMath() {
-        const ejemplo = `# Análisis Técnico, Ecuaciones y Diagramas de Flujo
-
-Este documento evalúa expresiones matemáticas complejas, tablas y arquitecturas con Mermaid.
-
----
-
-### 1. Ecuaciones y Cálculo Matricial
-
-La aproximación analítica de optimización lineal queda definida por:
-
-$$
-\begin{align*}
-f(x) &= x^2 + 2x + 1 \\
-     &= (x + 1)^2
-\end{align*}
-$$
-
-\\newpage
-
-### 2. Flujo de Ejecución y Pipeline del Bootloader
-
-\`\`\`mermaid
-graph TD
-    A[Punto de Entrada: app.py] --> B{¿Existe .env?}
-    B -- No --> C[Aprovisionar claves de 256 bits]
-    B -- Sí --> D[Sanitizar UTF-8 y Puertos]
-    C --> E[Auditoría SQLite PRAGMA]
-    D --> E
-    E --> F[Levantar Servidor HTTP Flask]
-\`\`\`
-
----
-
-### 3. Métricas de Rendimiento
-
-| Etapa | Latencia | Estado |
-| :--- | :--- | :--- |
-| Bootloader Init | 12 ms | Óptimo |
-| Parseo KaTeX | 4 ms | Vectorial |
-| Render Mermaid | 18 ms | SVG Nativo |
-`;
-        input.value = ejemplo;
-        if (!tituloInput.value.trim()) {
-            tituloInput.value = "Análisis Técnico y Diagramas";
+function limpiarEditor() {
+    if (confirm("¿Vaciar el documento actual?")) {
+        input.value = "";
+        tituloInput.value = "";
+        if (!currentDocId) {
+            localStorage.removeItem("pcm_doc_draft");
         }
         marcarModificado();
         renderizarDocumento();
+        input.focus();
     }
+}
+
+/* ==============================================================================
+   SECCIÓN 10: CATÁLOGO DE PRUEBAS Y PROMPTS PARA IA (MODAL INTEGRADO)
+   ============================================================================== */
+const MODULOS_PRUEBAS = {
+    math: {
+        prompt: `Genera un documento técnico en Markdown compatible con KaTeX.
+Requisitos:
+1. Bloques de fórmulas usando exclusivamente delimitadores $$ o entornos (\\begin{aligned}, \\begin{pmatrix}).
+2. Fórmulas inline delimitadas por un signo de dólar ($...$) sin espacios al borde.
+3. Incluye límites (\\lim), derivadas, integrales impropias (\\int_{a}^{b}) y un sistema matricial.`,
+        markdown: `### Cálculo Diferencial e Integral\n\n$$\n\\lim_{x \\to 0} \\left( \\frac{\\sin x}{x} \\right) = 1 \\quad \\text{y} \\quad \\int_{0}^{\\infty} x^2 e^{-x} \\, dx = 2\n$$\n\n### Álgebra Matricial\n\n$$\nA = \\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}\n$$`
+    },
+    mermaid: {
+        prompt: `Genera diagramas en Markdown usando Mermaid.js sin HTML incrustado.
+Requisitos:
+1. Diagrama de flujo 'graph TD' con decisiones, subgrafos y conexiones claras.
+2. Diagrama de secuencia 'sequenceDiagram' con participantes explícitos y autonumber.
+3. Bloques estrictos de triple comilla invertida con la palabra clave mermaid.`,
+        markdown: `\`\`\`mermaid\ngraph TD\n    A[Inicio] --> B{¿Requiere Auth?}\n    B -- Sí --> C[Iniciar Sesión]\n    B -- No --> D[Acceso Libre]\n    C --> E[Editor Markdown]\n    D --> E\n\`\`\``
+    },
+    gfm: {
+        prompt: `Genera una especificación técnica en GitHub Flavored Markdown (GFM).
+Requisitos:
+1. Tablas estructuradas con alineación.
+2. Listas de tareas con checkboxes (- [x] y - [ ]).
+3. Formateo tipográfico: ~~tachado~~, ==marcado==, subíndices (~H2O~) y superíndices (^2^).`,
+        markdown: `| Servicio | Protocolo | Estado |\n| :--- | :---: | ---: |\n| Backend Flask | HTTP / REST | Activo |\n| Base de Datos | SQLite | Conectado |\n\n- [x] Sanitización con DOMPurify\n- [ ] Exportación directa a PDF\n\nFórmula química: H~2~O  |  Potencia: 2^10^ = 1024  |  ==Importante==`
+    }
+};
+
+function abrirModalPruebas() {
+    actualizarContenidoModal(document.getElementById("modalSelectModulo").value);
+    document.getElementById("modalPruebas").style.display = "flex";
+    document.body.style.overflow = "hidden";
+}
+
+function cerrarModalPruebas() {
+    document.getElementById("modalPruebas").style.display = "none";
+    document.body.style.overflow = "";
+}
+
+function actualizarContenidoModal(modulo) {
+    document.getElementById("modalPromptTexto").value = MODULOS_PRUEBAS[modulo].prompt;
+    document.getElementById("modalMarkdownTexto").value = MODULOS_PRUEBAS[modulo].markdown;
+}
+
+function copiarPromptModal() {
+    const texto = document.getElementById("modalPromptTexto").value;
+    navigator.clipboard.writeText(texto).then(() => {
+        alert("Prompt copiado al portapapeles.");
+    });
+}
+
+function insertarEnEditor(reemplazarTodo) {
+    const textoAInsertar = document.getElementById("modalMarkdownTexto").value;
+
+    if (reemplazarTodo) {
+        if (input.value.trim().length > 0 && !confirm("¿Reemplazar el contenido actual del editor?")) {
+            return;
+        }
+        input.value = textoAInsertar;
+    } else {
+        const inicio = input.selectionStart;
+        const fin = input.selectionEnd;
+        const actual = input.value;
+        
+        input.value = actual.substring(0, inicio) + "\n\n" + textoAInsertar + "\n\n" + actual.substring(fin);
+        input.selectionStart = input.selectionEnd = inicio + textoAInsertar.length + 4;
+    }
+
+    cerrarModalPruebas();
+    marcarModificado();
+    renderizarDocumento();
+    input.focus();
+}
+
+/* ==============================================================================
+   SECCIÓN 11: CICLO DE VIDA Y EVENTOS GLOBALES DEL NAVEGADOR
+   ============================================================================== */
+// Atajo global Ctrl + S para persistencia manual
+window.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        guardarDocumento();
+    }
+});
+
+// Cierre unificado de ventanas modales con tecla Escape
+window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+        if (document.getElementById("modalPruebas").style.display === "flex") cerrarModalPruebas();
+        if (modalImagenes.style.display === "flex") cerrarModalImagenes();
+    }
+});
+
+// Cierre al hacer clic sobre el fondo oscuro exterior (Backdrop)
+document.getElementById("modalPruebas").addEventListener("click", (e) => {
+    if (e.target.id === "modalPruebas") cerrarModalPruebas();
+});
+
+modalImagenes.addEventListener("click", (e) => {
+    if (e.target === modalImagenes) cerrarModalImagenes();
+});
+
+// Inicialización controlada tras cargar el DOM
+document.addEventListener("DOMContentLoaded", () => {
+    // Si había una plantilla pendiente transferida por localStorage, se carga aquí de forma segura
+    const plantillaPendiente = localStorage.getItem("pcm_plantilla_cargada");
+    if (plantillaPendiente) {
+        input.value = plantillaPendiente;
+        localStorage.removeItem("pcm_plantilla_cargada");
+    }
+
+    localStorage.removeItem("pcm_doc_draft");
+    renderizarDocumento();
+});
 </script>
 {% endblock %}

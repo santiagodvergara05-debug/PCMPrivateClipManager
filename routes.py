@@ -824,3 +824,7 @@ def purgar_imagenes_huerfanas():
         flash("El almacenamiento está limpio: no se encontraron imágenes huérfanas.", "info")
 
     return redirect(url_for("clips.configuracion"))
+
+@clips_bp.route("/documentos/pruebas")
+def documentos_pruebas():
+    return render_template("documentos_pruebas.html")

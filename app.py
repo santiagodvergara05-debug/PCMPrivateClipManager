@@ -31,10 +31,6 @@ from datetime import datetime
 from flask import Flask, jsonify, request, send_from_directory
 from dotenv import load_dotenv, dotenv_values, set_key
 
-# Componentes del framework web y variables de entorno
-from flask import Flask, jsonify, request
-from dotenv import load_dotenv, dotenv_values, set_key
-
 # Módulos internos de la arquitectura PCM
 import database
 from routes import clips_bp, RUTA_ULTIMO_BACKUP
@@ -52,6 +48,7 @@ else:
     DIRECTORIO_RAIZ = os.path.dirname(os.path.abspath(__file__))
     BUNDLE_DIR = DIRECTORIO_RAIZ
 os.chdir(DIRECTORIO_RAIZ)
+
 # Definición centralizada de rutas persistentes en el disco local
 ENV_PATH = os.path.join(DIRECTORIO_RAIZ, ".env")
 DB_PATH = os.path.join(DIRECTORIO_RAIZ, "pcm.db")

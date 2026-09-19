@@ -1,3 +1,21 @@
+"""
+==============================================================================
+PCM PRIVATE CLIP MANAGER - NÚCLEO DEL SERVIDOR Y BOOTLOADER (APP.PY)
+==============================================================================
+Punto de entrada principal del sistema. Responsabilidades:
+1. Detección de entorno de ejecución (Desarrollo vs Binario congelado PyInstaller).
+2. Inicialización de la aplicación Flask y definición de límites globales (250 MiB).
+3. Telemetría de arranque estilo init/kernel de Linux con formateo ANSI.
+4. Motor de autorreparación, sanitización y serialización segura del archivo .env.
+5. Auditoría de integridad estructural y concurrencia de la base de datos SQLite.
+6. Aprovisionamiento, saneamiento de directorios y purga de archivos huérfanos.
+7. Resolución dinámica de interfaz LAN y puesta en marcha del servidor WSGI.
+==============================================================================
+"""
+
+# ==============================================================================
+# SECCIÓN 1: IMPORTACIONES Y RESOLUCIÓN DE RUTAS DEL SISTEMA
+# ==============================================================================
 import os
 import sys
 import time
@@ -6,43 +24,98 @@ import logging
 import socket
 import sqlite3
 import shutil
-from datetime import datetime
-from dotenv import load_dotenv, dotenv_values, set_key
-from flask import Flask
-import database
-from routes import clips_bp, RUTA_ULTIMO_BACKUP
 import webbrowser
 import threading
+from datetime import datetime
+
+# Componentes del framework web y variables de entorno
+from flask import Flask, jsonify, request
+from dotenv import load_dotenv, dotenv_values, set_key
+
+# Módulos internos de la arquitectura PCM
+import database
+from routes import clips_bp, RUTA_ULTIMO_BACKUP
 from version import VERSION
 
+# Detección de empaquetado PyInstaller (sys.frozen = True cuando es un binario .exe)
 ES_EXE = getattr(sys, "frozen", False)
 if ES_EXE:
+    # Directorio donde reside el ejecutable físico
     DIRECTORIO_RAIZ = os.path.dirname(sys.executable)
+    # Carpeta temporal donde PyInstaller descomprime los recursos estáticos y templates
     BUNDLE_DIR = getattr(sys, "_MEIPASS", DIRECTORIO_RAIZ)
 else:
+    # Entorno estándar de desarrollo de Python
     DIRECTORIO_RAIZ = os.path.dirname(os.path.abspath(__file__))
     BUNDLE_DIR = DIRECTORIO_RAIZ
 
-app = Flask(
-    __name__,
-    template_folder=os.path.join(BUNDLE_DIR, "templates"),
-    static_folder=os.path.join(BUNDLE_DIR, "static")
-)
-app.register_blueprint(clips_bp)
-
-# Rutas de almacenamiento persistente
+# Definición centralizada de rutas persistentes en el disco local
 ENV_PATH = os.path.join(DIRECTORIO_RAIZ, ".env")
 DB_PATH = os.path.join(DIRECTORIO_RAIZ, "pcm.db")
 UPLOADS_DIR = os.path.join(DIRECTORIO_RAIZ, "static", "uploads", "documentos")
 BACKUPS_DIR = os.path.join(DIRECTORIO_RAIZ, "backups")
 
 
-# ==========================================
-# MOTOR DE TELEMETRÍA Y LOGS ESTILO INIT
-# ==========================================
+# ==============================================================================
+# SECCIÓN 2: INICIALIZACIÓN DE FLASK Y REGLAS DE SEGURIDAD GLOBALES
+# ==============================================================================
+app = Flask(
+    __name__,
+    template_folder=os.path.join(BUNDLE_DIR, "templates"),
+    static_folder=os.path.join(BUNDLE_DIR, "static")
+)
 
+# Registro único del Blueprint de rutas
+app.register_blueprint(clips_bp)
+
+# Límite global amplio para soportar backups completos con multimedia: 250 MiB
+app.config["MAX_CONTENT_LENGTH"] = 250 * 1024 * 1024  # 262,144,000 bytes
+
+# ------------------------------------------------------------------------------
+# BLINDAJE DE IDENTIDAD: POLÍTICA DE COOKIES DE SESIÓN 
+#  HttpOnly → mitiga robo de cookie mediante JavaScript
+#  SameSite=Lax → mitiga una parte importante de ataques CSRF
+# ------------------------------------------------------------------------------
+
+# 1. Flag HttpOnly (Mitigación de Robo de Sesión por XSS):
+#    Indica al navegador que la cookie de sesión NO puede ser leída mediante JavaScript
+#    (bloquea llamadas tipo document.cookie). Si existiera una inyección de script,
+#    el atacante no podrá extraer el token de sesión en texto plano para secuestrar la cuenta.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+
+# 2. Flag SameSite=Lax (Mitigación Directa contra CSRF):
+#    Restringe el contexto de envío de la cookie. El navegador NO adjuntará la cookie
+#    en peticiones de origen cruzado (cross-site) que utilicen métodos inseguros (POST, PUT, DELETE).
+#    Si una pestaña externa intenta enviar un formulario oculto hacia http://127.0.0.1:5545/configuracion/borrar_todo,
+#    el navegador retiene la cookie, Flask recibe la petición como un usuario anónimo y la rechaza.
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+# 3. Flag Secure (Transmisión exclusiva por canal cifrado):
+#    ADVERTENCIA DE ENTORNO LAN: Se mantiene explícitamente en False porque PCM está diseñado
+#    para operar en redes locales sin certificados SSL/TLS (http://). Si se fijara en True,
+#    el navegador descartaría la cookie al no detectar HTTPS y rompería el inicio de sesión.
+app.config["SESSION_COOKIE_SECURE"] = False
+
+
+@app.errorhandler(413)
+def error_archivo_demasiado_grande(e):
+    """Intercepta peticiones que superen el límite físico de 250 MB."""
+    ip_origen = request.remote_addr
+    print(f"\n\033[91m[ALERTA DE SEGURIDAD :: OVERFLOW]\033[0m Carga masiva interceptada (> 250 MB) desde IP: {ip_origen}")
+    return jsonify({
+        "ok": False,
+        "error": "El archivo excede el tamaño máximo permitido por el servidor (250 MB)."
+    }), 413
+
+
+# ==============================================================================
+# SECCIÓN 3: MOTOR DE TELEMETRÍA Y LOGS ESTILO INIT / KERNEL
+# ==============================================================================
 def klog(estado, mensaje, delay=0.12):
-    """Imprime mensajes formateados al estilo init/kernel de Linux."""
+    """
+    Imprime mensajes de telemetría en consola formateados con códigos de color ANSI
+    simulando el inicio de un kernel Linux. Respeta terminales sin soporte TTY.
+    """
     prefijos = {
         "ok":   "  [\033[92m  OK  \033[0m] ",
         "info": "  [\033[94m INFO \033[0m] ",
@@ -58,10 +131,9 @@ def klog(estado, mensaje, delay=0.12):
         time.sleep(delay)
 
 
-# ==========================================
-# GESTIÓN Y AUTORREPARACIÓN DE ENTORNO (.ENV)
-# ==========================================
-
+# ==============================================================================
+# SECCIÓN 4: GESTIÓN, RESILIENCIA Y AUTORREPARACIÓN DE ENTORNO (.ENV)
+# ==============================================================================
 VALORES_PREDETERMINADOS = {
     "SISTEMA_INICIALIZADO": "true",
     "SECRET_KEY": lambda: secrets.token_hex(32),
@@ -69,34 +141,52 @@ VALORES_PREDETERMINADOS = {
     "APP_PASSWORD": "cambiame",
     "CONTRASENA_MOSTRADA": "false",
     "AUTO_ABRIR_NAVEGADOR": "false",
-    "FLASK_DEBUG": "false",
+    "FLASK_DEBUG": "true",
     "LOG_MODE": "true",
     "PORT": "5545",
     "HOST": "0.0.0.0",
 }
 
+def serializar_valor_env(valor):
+    """
+    Normaliza y escapa valores para persistencia en .env:
+    1. Elimina retornos de carro y saltos de línea para prevenir inyecciones de variables.
+    2. Escapa barras invertidas y comillas simples para admitir contraseñas con caracteres especiales.
+    """
+    v_str = str(valor).replace("\r", "").replace("\n", "")
+    v_str = v_str.replace("\\", "\\\\").replace("'", r"\'")
+    return f"'{v_str}'"
+
+
 def escribir_env_seguro(ruta_env, mapa_valores):
-    """Escribe todas las variables en una sola pasada con reintentos para evitar WinError 5 en Windows."""
+    """
+    Escribe atómicamente todas las claves del archivo .env en una única pasada con serialización segura.
+    Implementa reintentos con pausa para neutralizar bloqueos de archivo en Windows (WinError 5).
+    """
     for _ in range(4):
         try:
             with open(ruta_env, "w", encoding="utf-8") as f:
                 for k, v in mapa_valores.items():
-                    f.write(f"{k}='{v}'\n")
+                    f.write(f"{k}={serializar_valor_env(v)}\n")
             return True
         except (PermissionError, OSError):
             time.sleep(0.15)
     return False
 
+
 def sanitizar_y_reparar_env(ruta_env):
     """
-    Protección contra sabotaje: detecta archivos .env ilegibles, claves vacías,
-    sabotajes binarios o puertos/hosts fuera de rango. Aísla archivos dañados y
-    devuelve (faltantes, ya_inicializado, env_existia, archivo_danado, advertencias).
+    Protección activa contra manipulación y corrupción:
+    1. Detecta archivos .env ilegibles o alterados con datos binarios y los aísla en cuarentena.
+    2. Regenera parámetros faltantes con generadores criptográficos independientes.
+    3. Normaliza rangos de puerto (1..65535) y direcciones IP de enlace.
+    Devuelve: (faltantes, ya_inicializado, env_existia, archivo_danado, advertencias).
     """
     valores = {}
     archivo_danado = False
     env_existia = os.path.exists(ruta_env)
 
+    # 1. Comprobación de legibilidad del archivo existente
     if env_existia:
         try:
             with open(ruta_env, "r", encoding="utf-8") as f:
@@ -105,6 +195,7 @@ def sanitizar_y_reparar_env(ruta_env):
         except Exception:
             archivo_danado = True
 
+    # 2. Aislamiento preventivo ante daños de codificación o inyección binaria
     if archivo_danado:
         ya_inicializado = True
         klog("fail", "Archivo .env ilegible o corrupto (sabotaje de datos binarios).")
@@ -119,7 +210,7 @@ def sanitizar_y_reparar_env(ruta_env):
                 pass
         valores = {}
     else:
-        # El sistema ya estuvo en marcha si la bandera es true o si pcm.db ya existe en disco
+        # El sistema ya estuvo en marcha si el flag es 'true' o si pcm.db ya reside en disco
         flag_env = str(valores.get("SISTEMA_INICIALIZADO", "")).strip("'\"").lower() == "true"
         ya_inicializado = flag_env or os.path.exists(DB_PATH)
 
@@ -127,14 +218,14 @@ def sanitizar_y_reparar_env(ruta_env):
     faltantes = []
     advertencias = []
 
-    # Detección de incoherencia: DB presente pero SISTEMA_INICIALIZADO explícitamente en 'false'
+    # 3. Detección de incoherencias de estado
     val_init = valores.get("SISTEMA_INICIALIZADO")
     if val_init is not None and str(val_init).strip("'\"").lower() == "false" and os.path.exists(DB_PATH):
         advertencias.append("Inconsistencia: Base de datos activa pero SISTEMA_INICIALIZADO='false'. Corrigiendo a 'true'...")
         valores["SISTEMA_INICIALIZADO"] = "true"
         hubo_cambios = True
 
-    # 1. Comprobar claves predeterminadas faltantes o vacías
+    # 4. Provisión de claves predeterminadas ausentes o vacías
     for clave, valor_default in VALORES_PREDETERMINADOS.items():
         val = valores.get(clave)
         if val is None or not str(val).strip():
@@ -143,7 +234,7 @@ def sanitizar_y_reparar_env(ruta_env):
             faltantes.append(clave)
             hubo_cambios = True
 
-    # 2. Sanitizar Puerto (PORT): rango 1 a 65535
+    # 5. Sanitización de Puerto de Red (PORT: 1 a 65535)
     puerto_raw = valores.get("PORT", "5545")
     try:
         puerto_num = int(str(puerto_raw).strip("'\""))
@@ -155,14 +246,14 @@ def sanitizar_y_reparar_env(ruta_env):
         valores["PORT"] = "5545"
         hubo_cambios = True
 
-    # 3. Sanitizar Interfaz de Red (HOST)
+    # 6. Sanitización de Interfaz de Escucha (HOST)
     host_raw = str(valores.get("HOST", "0.0.0.0")).strip("'\"")
     if host_raw not in ["127.0.0.1", "0.0.0.0"]:
         advertencias.append(f"Host no estándar detectado ({host_raw}). Normalizando a 0.0.0.0...")
         valores["HOST"] = "0.0.0.0"
         hubo_cambios = True
 
-    # 4. Escritura segura en disco
+    # 7. Persistencia final en disco
     if hubo_cambios:
         exito = escribir_env_seguro(ruta_env, valores)
         if not exito:
@@ -174,23 +265,27 @@ def sanitizar_y_reparar_env(ruta_env):
     return faltantes, ya_inicializado, env_existia, archivo_danado, advertencias
 
 
-# ==========================================
-# AUDITORÍA AVANZADA DE BASE DE DATOS SQLITE
-# ==========================================
-
+# ==============================================================================
+# SECCIÓN 5: AUDITORÍA AVANZADA DE INTEGRIDAD SQLITE
+# ==============================================================================
 def auditar_integridad_db(db_path):
     """
-    Verifica integridad física, esquemas maestros y previene bloqueos de concurrencia.
+    Inspecciona la salud física del motor SQLite:
+    - PRAGMA integrity_check para detectar páginas de disco corruptas.
+    - Presencia de esquemas relacionales mínimos obligatorios ('clips', 'documentos').
+    - Cuantifica registros por categoría para telemetría.
+    - Maneja bloqueos transaccionales (locks concurrentes).
     """
     if not os.path.exists(db_path):
         return "ausente", 0, 0, 0, 0
 
     conn = None
     try:
-        # Timeout bajo para detectar bloqueos exclusivos de CLI_chaos
+        # Timeout preventivo corto para evitar congelamientos si la base está capturada
         conn = sqlite3.connect(db_path, timeout=2.0)
         cur = conn.cursor()
 
+        # Validación estructural de páginas
         cur.execute("PRAGMA integrity_check;")
         res = cur.fetchone()
         if not res or res[0] != "ok":
@@ -202,6 +297,7 @@ def auditar_integridad_db(db_path):
         if len(tablas) < 2:
             return "incompleta", 0, 0, 0, 0
 
+        # Cómputo de métricas para el log de inicio
         cur.execute("SELECT COUNT(*) FROM clips WHERE categoria NOT IN ('Novelas', 'Borrador', 'Resumen') AND categoria NOT LIKE 'Codigo:%';")
         total_clips = cur.fetchone()[0]
 
@@ -227,12 +323,14 @@ def auditar_integridad_db(db_path):
             conn.close()
 
 
-# ==========================================
-# SANEAMIENTO DE SISTEMA DE ARCHIVOS
-# ==========================================
-
+# ==============================================================================
+# SECCIÓN 6: SANEAMIENTO DEL SISTEMA DE ARCHIVOS Y PURGA
+# ==============================================================================
 def sanear_directorios_y_archivos(ya_inicializado=False):
-    """Garantiza la presencia de todas las carpetas, alerta borrados accidentales y depura archivos basura."""
+    """
+    Verifica y aprovisiona los directorios indispensables para la ejecución.
+    Elimina archivos temporales o huérfanos de 0 bytes causados por cierres abruptos o sabotaje.
+    """
     directorios = [
         ("templates", os.path.join(DIRECTORIO_RAIZ, "templates")),
         ("static", os.path.join(DIRECTORIO_RAIZ, "static")),
@@ -252,7 +350,7 @@ def sanear_directorios_y_archivos(ya_inicializado=False):
         else:
             klog("ok", f"Directorio confirmado: /{nombre}")
 
-    # Purgar archivos de 0 bytes en uploads generados por sabotaje
+    # Purgar archivos de 0 bytes en uploads generados por transferencias fallidas
     if os.path.exists(UPLOADS_DIR):
         purgados = 0
         for f in os.listdir(UPLOADS_DIR):
@@ -264,17 +362,17 @@ def sanear_directorios_y_archivos(ya_inicializado=False):
                 except Exception:
                     pass
         if purgados > 0:
-            klog("warn", f"Saneamiento: {purgados} archivo(s) huérfanos de 0 bytes eliminados de uploads.")
+            klog("warn", f"Saneamiento: {purgados} archivo(s) huérfano(s) de 0 bytes eliminados de uploads.")
 
 
-# ==========================================
-# RUTINA PRINCIPAL DE ARRANQUE (BOOTLOADER)
-# ==========================================
-
+# ==============================================================================
+# SECCIÓN 7: RUTINA DE ARRANQUE (BOOTLOADER), RED LAN Y SERVIDOR WSGI
+# ==============================================================================
 if __name__ == "__main__":
+    # Bandera de Werkzeug para suprimir el banner duplicado en modo recarga automática
     es_reloader = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
 
-    # Migración retrocompatible transparente
+    # Migración transparente de versiones heredadas (cliptemp.db -> pcm.db)
     antigua_db = os.path.join(DIRECTORIO_RAIZ, "cliptemp.db")
     if os.path.exists(antigua_db) and not os.path.exists(DB_PATH):
         try:
@@ -288,7 +386,7 @@ if __name__ == "__main__":
         print("=" * 65)
         time.sleep(0.2)
 
-# 1. Auditoría y aprovisionamiento detallado del entorno (.env)
+        # 1. Auditoría y reparación de variables de entorno (.env)
         faltantes, ya_inicializado, env_existia, archivo_danado, advertencias = sanitizar_y_reparar_env(ENV_PATH)
 
         if not env_existia:
@@ -318,7 +416,7 @@ if __name__ == "__main__":
             else:
                 klog("ok", "Archivo .env verificado: todas las variables presentes.")
 
-        # Carga de variables en el contexto de Flask
+        # Cargar variables en el entorno del proceso
         try:
             load_dotenv(ENV_PATH, override=True)
         except Exception:
@@ -329,11 +427,11 @@ if __name__ == "__main__":
         if os.environ.get("MASTER_KEY") and os.environ.get("SECRET_KEY"):
             klog("ok", "Llaves maestras criptográficas listas (256 bits).")
 
-        # 2. Directorios físicos y multimedia con contexto previo
+        # 2. Comprobación y aprovisionamiento de carpetas físicas
         klog("init", "Verificando estructura de directorios y almacenamiento...")
         sanear_directorios_y_archivos(ya_inicializado=ya_inicializado)
 
-        # 3. Auditoría de Base de Datos con diferenciación de primer inicio vs borrado accidental
+        # 3. Auditoría de integridad de base de datos SQLite
         estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
 
         if estado_db == "bloqueada":
@@ -347,14 +445,14 @@ if __name__ == "__main__":
 
         if estado_db == "ausente":
             if not ya_inicializado:
-                # Caso A: Primer arranque real del sistema
+                # Caso A: Primer despliegue
                 klog("info", "Almacenamiento persistente SQLite ausente.")
                 klog("init", "Creando base de datos SQLite y esquemas relacionales...")
                 klog("info", "pcm.db será generado en el directorio raíz de la aplicación.")
                 database.inicializar_db()
                 klog("ok", "Base de datos creada e indexada correctamente.")
             else:
-                # Caso B: El sistema ya estaba en marcha pero la base fue eliminada (Opción 5 Chaos)
+                # Caso B: Base eliminada accidentalmente con .env previo
                 klog("fail", "Almacenamiento SQLite ausente o eliminado por accidente.")
                 klog("warn", "Se detectó configuración previa (.env) pero pcm.db no existe.")
                 klog("warn", "Creando una base de datos SQLite limpia para permitir el arranque...")
@@ -398,20 +496,20 @@ if __name__ == "__main__":
             database.inicializar_db()
             klog("ok", f"Base verificada: {n_clips} clips, {n_codigos} cod, {n_resumenes} bor, {n_docs} docs.")
 
-        # 4. Auditoría de Respaldo Previo
+        # 4. Verificación de última instantánea de respaldo
         ruta_backup = os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_BACKUP)
         if os.path.exists(ruta_backup):
             try:
-                with open(ruta_backup, "r") as f:
+                with open(ruta_backup, "r", encoding="utf-8") as f:
                     ts = float(f.read().strip())
-                    fecha_str = datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
+                    fecha_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
                     klog("ok", f"Último respaldo verificado: {fecha_str}")
             except Exception:
                 klog("warn", "Archivo de seguimiento de backup corrupto (ignorado con seguridad).")
         else:
             klog("info", "No se detecta snapshot de respaldo previo.")
 
-        # Alerta de contraseña de fábrica
+        # 5. Detección y alerta de contraseña por defecto
         contrasena_ya_mostrada = os.environ.get("CONTRASENA_MOSTRADA", "false").lower() == "true"
         if os.environ.get("APP_PASSWORD") == "cambiame" and not contrasena_ya_mostrada:
             print("\n" + "!" * 65)
@@ -426,7 +524,7 @@ if __name__ == "__main__":
         print(" [i] SUITE DE ESTRÉS & RESILIENCIA:      python CLI_chaos.py")
         print("-" * 65)
 
-    # Configuración de Red y Despliegue Flask
+    # Configuración de red y modo de logging de Werkzeug
     load_dotenv(ENV_PATH, override=True)
     app.secret_key = os.environ.get("SECRET_KEY")
 
@@ -441,6 +539,7 @@ if __name__ == "__main__":
     except ValueError:
         port = 5545
 
+    # Resolución dinámica de la dirección IP para la red local
     if not es_reloader:
         if host == "0.0.0.0":
             ip_lan = "127.0.0.1"
@@ -468,11 +567,13 @@ if __name__ == "__main__":
         print(">>> PCMPrivateClipManager OPERATIVO Y LISTO <<<")
         print("-" * 65 + "\n")
 
+    # Apertura diferida del navegador en modo ejecutable
     if ES_EXE and not es_reloader:
         auto_abrir = os.environ.get("AUTO_ABRIR_NAVEGADOR", "false").lower() == "true"
         if auto_abrir:
             threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
 
+    # Ejecución del servidor HTTP
     app.run(
         host=host,
         port=port,

@@ -1254,3 +1254,9 @@ details[open] summary {
         border-color: #16a34a !important;
     }
 }
+
+#docInput {
+    white-space: pre !important;
+    overflow-x: auto !important;
+    word-break: normal !important;
+}

@@ -1,3 +1,7 @@
+{# ============================================================================== #}
+{# PCM PRIVATE CLIP MANAGER - NÚCLEO DE EDICIÓN Y RENDERIZADO V7                  #}
+{# ============================================================================== #}
+
 {% extends "base.html" %}
 
 {% block title %}PCMPrivateClipManager - Documentos Markdown & PDF{% endblock %}
@@ -170,7 +174,7 @@
 <script>
 /**
  * ==============================================================================
- * PCM PRIVATE CLIP MANAGER - NÚCLEO DE EDICIÓN Y RENDERIZADO V4
+ * PCM PRIVATE CLIP MANAGER - NÚCLEO DE EDICIÓN Y RENDERIZADO
  * ==============================================================================
  * Este script gestiona el ciclo de vida completo del editor técnico:
  * 1. Aislamiento por Token Shield (evita colisiones regex con código o LaTeX).
@@ -264,14 +268,15 @@ function escaparHTML(texto) {
    reemplazan por tokens únicos con 'nonce' efímero. Una vez parseado el Markdown,
    los tokens son devueltos a su lugar con su respectivo motor (KaTeX / Mermaid).
    ============================================================================== */
+// Caché en memoria para evitar recompilar SVGs que no cambiaron
+const mermaidCache = new Map();
+
 function renderizarDocumento() {
     const rawText = input.value;
     let texto = rawText;
 
-    // Generar un nonce dinámico por cada pasada de renderizado (blindaje contra colisiones)
     const nonce = Math.random().toString(36).substring(2, 8);
 
-    // Contenedores temporales para aislar el contenido protegido
     const codeTokens = [];
     let codeIndex = 0;
     const mathTokens = [];
@@ -283,45 +288,44 @@ function renderizarDocumento() {
     const strikethroughTokens = [];
     let strikeIndex = 0;
 
-    // Prefijos efímeros garantizados para este ciclo específico
     const CODE_PREFIX    = `@@PCM_${nonce}_CODE_`;
     const MATH_PREFIX    = `@@PCM_${nonce}_MATH_`;
     const MERMAID_PREFIX = `@@PCM_${nonce}_MERMAID_`;
     const DOLLAR_PREFIX  = `@@PCM_${nonce}_DOLLAR_`;
     const STRIKE_PREFIX  = `@@PCM_${nonce}_STRIKE_`;
 
-    // PASO 0: Extraer y aislar bloques Mermaid (```mermaid ... ```)
+    // PASO 0: Extraer y aislar bloques Mermaid
     texto = texto.replace(/(?:^|\n)[ \t]*```+mermaid[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```+[ \t]*(?:\n|$)/gi, (match, diagramCode) => {
         const key = `${MERMAID_PREFIX}${mermaidIndex++}@@`;
         mermaidTokens.push({ key, code: diagramCode.trim() });
         return `\n\n${key}\n\n`;
     });
 
-    // PASO 1: Extraer bloques de código multilínea (```lang ... ```)
+    // PASO 1: Bloques de código
     texto = texto.replace(/(```[\s\S]*?```)/g, (match) => {
         const key = `${CODE_PREFIX}BLOCK_${codeIndex++}@@`;
         codeTokens.push({ key, val: match });
         return key;
     });
 
-    // PASO 1.1: Extraer código inline (`...`)
+    // PASO 1.1: Código inline
     texto = texto.replace(/(?<!`)(`+)(.+?)(?<!`)\1(?!`)/g, (match) => {
         const key = `${CODE_PREFIX}INLINE_${codeIndex++}@@`;
         codeTokens.push({ key, val: match });
         return key;
     });
 
-    // PASO 2: Extraer signos de dólar escapados literalmente por el usuario (\$)
+    // PASO 2: Dólares escapados
     texto = texto.replace(/\\\$/g, () => {
         const key = `${DOLLAR_PREFIX}${dollarIndex++}@@`;
         escapedDollars.push({ key, val: "$" });
         return key;
     });
 
-    // PASO 3: Convertir comandos \newpage en separadores de hoja para exportación PDF
+    // PASO 3: Salto A4
     texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');
 
-    // PASO 4: Extraer fórmulas matemáticas en bloque ($$...$$ y \[...\])
+    // PASO 4: KaTeX en bloque
     texto = texto.replace(/\$\$([\s\S]*?)\$\$/g, (match, expr) => {
         const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
         mathTokens.push({ key, expr, display: true });
@@ -334,14 +338,14 @@ function renderizarDocumento() {
         return `\n\n${key}\n\n`;
     });
 
-    // PASO 4.5: Extraer entornos LaTeX huérfanos con retroreferencia estricta (\2)
+    // PASO 4.5: Entornos LaTeX huérfanos
     texto = texto.replace(/(?:^|\n)[ \t]*(\\begin\{(align\*?|gather\*?|aligned|matrix|pmatrix|bmatrix|vmatrix|cases|equation\*?)\}[\s\S]*?\\end\{\2\})[ \t]*(?:\n|$)/g, (match, expr) => {
         const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
         mathTokens.push({ key, expr, display: true });
         return `\n\n${key}\n\n`;
     });
 
-    // PASO 5: Extraer fórmulas matemáticas inline ($...$ y \(...\))
+    // PASO 5: KaTeX inline
     texto = texto.replace(/\\\(([\s\S]*?)\\\)/g, (match, expr) => {
         const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
         mathTokens.push({ key, expr, display: false });
@@ -354,8 +358,7 @@ function renderizarDocumento() {
         return key;
     });
 
-    // PASO 5.5: Tipografía extendida (Tachado, Resaltado, Subíndices y Superíndices)
-    // Se aísla el tachado GFM (~~) para que los subíndices (~) no destruyan sus pares
+    // PASO 5.5: Tipografía extendida
     texto = texto.replace(/~~([^\s~](?:[\s\S]*?[^\s~])?)~~/g, (match, contenido) => {
         const key = `${STRIKE_PREFIX}${strikeIndex++}@@`;
         strikethroughTokens.push({ key, val: `<del>${contenido}</del>` });
@@ -366,12 +369,11 @@ function renderizarDocumento() {
     texto = texto.replace(/(?<!~)~([^\s~]+?)~(?!~)/g, '<sub>$1</sub>');
     texto = texto.replace(/(?<!\^)\^([^\s\^]+?)\^(?!\^)/g, '<sup>$1</sup>');
 
-    // Restaurar tachados GFM procesados
     strikethroughTokens.forEach(item => {
         texto = texto.replace(item.key, () => item.val);
     });
 
-    // PASO 6: Restaurar los bloques de código y dólares antes de pasarlo a Marked
+    // PASO 6: Restaurar código
     codeTokens.forEach(item => {
         texto = texto.replace(item.key, () => item.val);
     });
@@ -380,15 +382,14 @@ function renderizarDocumento() {
         texto = texto.replace(item.key, () => item.val);
     });
 
-    // PASO 7: Compilar Markdown a HTML y sanitizar con DOMPurify
-    // Se conservan estilos inline permitidos para uso en entorno seguro LAN
+ // PASO 7: Compilar Markdown y Sanitizar de forma estricta
     let parsedHtml = marked.parse(texto);
     let safeHtml = DOMPurify.sanitize(parsedHtml, {
         ADD_TAGS: ['div', 'span', 'p', 'img', 'sub', 'sup', 'mark', 'kbd', 'details', 'summary'],
-        ADD_ATTR: ['width', 'height', 'align', 'class', 'open', 'style']
+        ADD_ATTR: ['width', 'height', 'align', 'class', 'open']
     });
 
-    // PASO 8: Reemplazar tokens matemáticos con el render vectorial de KaTeX
+    // PASO 8: KaTeX
     mathTokens.forEach(tok => {
         let rendered = "";
         try {
@@ -403,7 +404,6 @@ function renderizarDocumento() {
         const bloqueKaTeX = tok.display ? `<div class="katex-display-wrapper">${rendered}</div>` : rendered;
         const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
 
-        // Si el token quedó envuelto dentro de un <p>, lo desenrollamos para no romper el HTML
         if (tok.display && pWrapper.test(safeHtml)) {
             safeHtml = safeHtml.replace(pWrapper, () => bloqueKaTeX);
         } else {
@@ -411,16 +411,28 @@ function renderizarDocumento() {
         }
     });
 
-    // PASO 9: Inyectar contenedores de Mermaid en los tokens correspondientes
+    // PASO 9: Inyectar Mermaid (Usa SVG en caché si existe; si no, deja el div crudo para compilar)
+    const diagramasACompilar = [];
+
     mermaidTokens.forEach(tok => {
-        const codigoEscapado = tok.code
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
+        let bloqueMermaid = "";
 
-        const bloqueMermaid = `<div class="mermaid-diagram-wrapper"><div class="mermaid">${codigoEscapado}</div></div>`;
+        if (mermaidCache.has(tok.code)) {
+            // Reutilización instantánea (0ms de CPU)
+            bloqueMermaid = `<div class="mermaid-diagram-wrapper">${mermaidCache.get(tok.code)}</div>`;
+        } else {
+            // Nuevo o editado: requiere pase vectorial de Mermaid
+            const codigoEscapado = tok.code
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            const tempId = `mermaid_target_${Math.random().toString(36).substring(2, 8)}`;
+            bloqueMermaid = `<div class="mermaid-diagram-wrapper"><div class="mermaid" id="${tempId}" data-raw-code="${encodeURIComponent(tok.code)}">${codigoEscapado}</div></div>`;
+            diagramasACompilar.push(tempId);
+        }
+
         const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
-
         if (pWrapper.test(safeHtml)) {
             safeHtml = safeHtml.replace(pWrapper, () => bloqueMermaid);
         } else {
@@ -428,32 +440,41 @@ function renderizarDocumento() {
         }
     });
 
-    // Aplicar el árbol HTML procesado en la hoja de previsualización
     output.innerHTML = safeHtml;
 
-    // PASO 10: Disparar compilación vectorial de diagramas Mermaid
-    if (window.mermaid && mermaidTokens.length > 0) {
-        try {
-            const nodos = output.querySelectorAll('.mermaid');
-            nodos.forEach(el => el.removeAttribute('data-processed'));
+    // PASO 10: Compilar de forma asíncrona ÚNICAMENTE los diagramas que no estaban en caché
+    if (window.mermaid && diagramasACompilar.length > 0) {
+        const nodosNuevos = diagramasACompilar
+            .map(id => document.getElementById(id))
+            .filter(el => el !== null);
 
-            if (typeof mermaid.run === "function") {
-                mermaid.run({ nodes: nodos }).catch(err => {
-                    console.warn("Fallo al compilar diagrama Mermaid:", err);
+    if (nodosNuevos.length > 0) {
+        if (typeof mermaid.run === "function") {
+            mermaid.run({ nodes: nodosNuevos }).then(() => {
+                // 1. Tope de memoria: si supera 50 diagramas, limpia el caché (Punto 6)
+                if (mermaidCache.size > 50) {
+                    mermaidCache.clear();
+                }
+
+                // 2. Almacenar en caché sin IDs duplicados (Punto 7)
+                nodosNuevos.forEach(el => {
+                    const rawCode = decodeURIComponent(el.getAttribute("data-raw-code"));
+                    if (rawCode && el.parentElement) {
+                        const clon = el.cloneNode(true);
+                        clon.removeAttribute("id");
+                        clon.removeAttribute("data-raw-code");
+                        mermaidCache.set(rawCode, clon.outerHTML);
+                    }
                 });
-            } else if (typeof mermaid.init === "function") {
-                mermaid.init(undefined, nodos);
-            }
-        } catch (err) {
-            console.warn("Error en ejecución de Mermaid:", err);
+            }).catch(err => console.warn("Fallo Mermaid run:", err));
+        } else if (typeof mermaid.init === "function") {
+            mermaid.init(undefined, nodosNuevos);
         }
     }
-
-    // Actualizar conteo en vivo de palabras y caracteres
+}
     const palabras = rawText.trim() === "" ? 0 : rawText.trim().split(/\s+/).length;
     actualizarMetricas(palabras, rawText.length);
 }
-
 
 /* ==============================================================================
    SECCIÓN 5: MÉTRICAS EN VIVO Y CONTROL DE ENTRADA (DEBOUNCE)
@@ -462,9 +483,6 @@ function actualizarMetricas(palabras, caracteres) {
     docStats.textContent = `${palabras.toLocaleString()} palabras · ${caracteres.toLocaleString()} caracteres`;
 }
 
-/**
- * Registra que el documento fue alterado respecto a la versión en base de datos.
- */
 function marcarModificado() {
     revision++;
     hayCambiosSinGuardar = true;
@@ -472,30 +490,39 @@ function marcarModificado() {
     saveStatus.className = "save-status-badge status-unsaved";
 }
 
-// Amortiguador (Debounce) de 70ms: evita recalcular el render en cada pulsación ultrarrápida
-let debounceTimer = null;
-input.addEventListener("input", () => {
-    marcarModificado();
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-        renderizarDocumento();
-    }, 70);
-});
-
-tituloInput.addEventListener("input", marcarModificado);
+let lineasAnteriores = 0;
 
 /**
- * Genera la secuencia numérica 1..N según los saltos de línea (\n)
+ * Genera la secuencia numérica 1..N inmediatamente sin esperar al debounce.
  */
 function actualizarNumerosLinea() {
     if (!docLineNumbers) return;
     const totalLineas = input.value.split("\n").length;
+
+    // Si la cantidad de líneas no cambió, evitamos repintar el DOM
+    if (totalLineas === lineasAnteriores) return;
+    lineasAnteriores = totalLineas;
+
     let acumulador = "";
     for (let i = 1; i <= totalLineas; i++) {
         acumulador += i + "\n";
     }
     docLineNumbers.textContent = acumulador;
 }
+
+// 250ms: estándar de alto rendimiento (permite fluidez sin asfixiar la CPU)
+let debounceTimer = null;
+input.addEventListener("input", () => {
+    marcarModificado();
+    actualizarNumerosLinea(); // <-- SE EJECUTA EN 0ms (Inmediato en cada Enter o borrado)
+
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        renderizarDocumento();
+    }, 250);
+});
+
+tituloInput.addEventListener("input", marcarModificado);
 
 // Sincronización de scroll vertical entre el textarea y la canaleta
 input.addEventListener("scroll", () => {
@@ -573,17 +600,28 @@ function insertarTextoEnCursor(texto) {
     input.value = contenido.substring(0, start) + texto + contenido.substring(end);
     input.selectionStart = input.selectionEnd = start + texto.length;
     marcarModificado();
+    actualizarNumerosLinea(); // <-- Actualiza si el texto insertado contiene saltos de línea
     renderizarDocumento();
     input.focus();
 }
 
 async function subirArchivoImagen(file) {
+    const LIMITE_MB = 25;
+    const MAX_BYTES = LIMITE_MB * 1024 * 1024; // 26,214,400 bytes (25 MiB)
+
     if (!file || !file.type.startsWith("image/")) {
         alert("Por favor selecciona un archivo de imagen válido.");
         return;
     }
 
+    // Control preventivo en el cliente
+    if (file.size > MAX_BYTES) {
+        alert(`La imagen supera el límite permitido de ${LIMITE_MB} MB.`);
+        return;
+    }
+
     saveStatus.textContent = "⏳ Subiendo imagen...";
+    // ... resto del fetch sin cambios ...
     saveStatus.className = "save-status-badge status-saving";
 
     const formData = new FormData();
@@ -858,6 +896,7 @@ function limpiarEditor() {
             localStorage.removeItem("pcm_doc_draft");
         }
         marcarModificado();
+        actualizarNumerosLinea(); // <-- Resetea la canaleta al número 1
         renderizarDocumento();
         input.focus();
     }
@@ -1064,29 +1103,6 @@ $$
 f(x) = \\sum_{k=0}^{\\infty} \\frac{f^{(k)}(x_0)}{k!} (x - x_0)^k, \\qquad x_{n+1} = x_n - \\frac{P(x_n)}{P'(x_n)}
 $$`
     },
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 mermaid: {
         prompt: `Genera diagramas en Markdown usando exclusivamente Mermaid.js compatible con PCM.
 Restricciones de sintaxis:
@@ -1265,7 +1281,7 @@ stateDiagram-v2
     Inactivo --> Editando : Entrada de texto por teclado
     Editando --> EnEsperaDebounce : Se detiene la escritura
     EnEsperaDebounce --> Editando : Nueva pulsación detectada
-    EnEsperaDebounce --> Renderizando : Expira temporizador (70ms)
+    EnEsperaDebounce --> Renderizando : Expira temporizador (250ms)
 
     state Renderizando {
         [*] --> ExtraccionTokens
@@ -1278,7 +1294,7 @@ stateDiagram-v2
 
     Renderizando --> Sincronizado : Buffer volcado al DOM
     Sincronizado --> Editando : Modificación posterior
-    Sincronizado --> Persistiendo : Ctrl + S / Guardado automático
+    Sincronizado --> Persistiendo : Guardado manual (Ctrl + S)
 
     state Persistiendo {
         [*] --> VerificacionMutex
@@ -1615,77 +1631,9 @@ function insertarEnEditor(reemplazarTodo) {
 
     cerrarModalPruebas();
     marcarModificado();
+    actualizarNumerosLinea(); // <-- ACTUALIZACIÓN INMEDIATA DE LÍNEAS AL INSERTAR
     renderizarDocumento();
     input.focus();
-}
-
-/**
- * Emula el motor de paginación de Chromium evaluando bloque por bloque
- * e insertando la línea de corte exactamente donde el navegador hace el salto.
- */
-function actualizarPaginacionVisual() {
-    if (!output) return;
-
-    output.querySelectorAll('.a4-page-marker').forEach(el => el.remove());
-
-    const tester = document.createElement('div');
-    tester.style.height = '261mm';
-    tester.style.position = 'absolute';
-    tester.style.visibility = 'hidden';
-    document.body.appendChild(tester);
-    const ALTO_PAGINA_PX = tester.clientHeight || 986;
-    document.body.removeChild(tester);
-
-    const hijos = Array.from(output.children);
-    let alturaAcumulada = 0;
-    let numPagina = 1;
-
-    for (let i = 0; i < hijos.length; i++) {
-        const el = hijos[i];
-
-        if (el.classList.contains('no-print') || el.classList.contains('a4-page-marker')) continue;
-
-        if (el.classList.contains('pdf-page-break')) {
-            alturaAcumulada = 0;
-            numPagina++;
-            continue;
-        }
-
-        const estilo = window.getComputedStyle(el);
-        const marginTop = parseFloat(estilo.marginTop) || 0;
-        const marginBottom = parseFloat(estilo.marginBottom) || 0;
-        const altoTotalBloque = el.offsetHeight + marginTop + marginBottom;
-
-        // Si el bloque actual no cabe en lo que resta de la carilla
-        if (alturaAcumulada > 0 && (alturaAcumulada + altoTotalBloque > ALTO_PAGINA_PX)) {
-            let elementoDondeCortar = el;
-
-            // Si el elemento anterior era un título o un separador, el corte debe ir ANTES del título
-            if (i > 0) {
-                const elAnterior = hijos[i - 1];
-                if (/^H[1-6]$/i.test(elAnterior.tagName) || elAnterior.tagName === 'HR') {
-                    elementoDondeCortar = elAnterior;
-                }
-            }
-
-            const estiloCorte = window.getComputedStyle(elementoDondeCortar);
-            const mTopCorte = parseFloat(estiloCorte.marginTop) || 0;
-
-            const marker = document.createElement('div');
-            marker.className = 'a4-page-marker no-print';
-            marker.style.top = `${elementoDondeCortar.offsetTop - mTopCorte}px`;
-            marker.innerHTML = `<span>📄 Límite Pág. ${numPagina} (A4)</span>`;
-            output.appendChild(marker);
-
-            // Reiniciar la cuenta considerando los elementos trasladados
-            alturaAcumulada = (elementoDondeCortar !== el) 
-                ? (elementoDondeCortar.offsetHeight + altoTotalBloque) 
-                : altoTotalBloque;
-            numPagina++;
-        } else {
-            alturaAcumulada += altoTotalBloque;
-        }
-    }
 }
 
 /* ==============================================================================

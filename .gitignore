@@ -38,6 +38,11 @@ __pycache__/
 static/uploads/documentos/*
 !static/uploads/documentos/.gitkeep
 
+# Archivos multimedia subidos por usuarios
+uploads/
+uploads/*
+!uploads/.gitkeep
+
 # ==========================================
 # RESPALDOS Y REGISTROS TEMPORALES
 # ==========================================

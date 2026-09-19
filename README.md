@@ -36,7 +36,7 @@ Construido bajo una filosofía de tolerancia extrema a fallos, incorpora un **Bo
 * **Notación matemática LaTeX:** Renderizado ultra rápido sin dependencias pesadas para fórmulas inline (`$...$`) y bloques de ecuaciones (`$$...$$`).
 * **Diagramas interactivos:** Renderizado de diagramas de arquitectura, flujos y secuencias con Mermaid.js.
 * **Preparado para impresión (Formato A4):** Control de saltos de página (`\newpage`) y diseño calibrado para exportar a PDF vectorial nítido desde el navegador.
-* **Almacenamiento multimedia blindado:** Subida de imágenes de hasta 25 MB con validación binaria de (PNG, JPG, GIF, WEBP) para neutralizar exploits de extensión falsa.
+* **Almacenamiento multimedia blindado:** Subida de imágenes de hasta 25 MB con validación binaria de *Magic Bytes* (PNG, JPG, GIF, WEBP) para neutralizar exploits de extensión falsa.
 * **Mantenimiento inteligente:** Algoritmo de purga para escanear y eliminar imágenes huérfanas en disco que ya no se encuentren vinculadas a ningún documento.
 
 ### 5. ⚙️ Ajustes Críticos, Seguridad & Respaldos
@@ -107,3 +107,101 @@ PCMPrivateClipManager/
 ├── requirements.txt              # Dependencias de Python
 ├── iniciar.bat                   # Lanzador para entornos Windows
 └── iniciar.sh                    # Lanzador para entornos Linux / macOS
+
+
+
+---
+
+## ⚙️ Instalación y Despliegue
+
+### Requisitos Previos
+
+* **Python 3.9** o superior instalado en el sistema.
+
+### 1. Clonar el repositorio
+
+```bash
+git clone [https://github.com/santiagodvergara05-debug/PCMPrivateClipManager.git](https://github.com/santiagodvergara05-debug/PCMPrivateClipManager.git)
+cd PCMPrivateClipManager
+
+```
+
+### 2. Crear entorno virtual e instalar dependencias
+
+```bash
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+
+# Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+```
+
+### 3. Puesta en marcha
+
+* **En Windows:** Ejecutar `iniciar.bat` o iniciar desde terminal con:
+```bash
+python app.py
+
+```
+
+
+* **En Linux / macOS:** Conceder permisos de ejecución y arrancar:
+```bash
+chmod +x iniciar.sh
+./iniciar.sh
+
+```
+
+
+
+El sistema abrirá automáticamente el navegador en:
+
+```text
+[http://127.0.0.1:5545](http://127.0.0.1:5545)
+
+```
+
+---
+
+## 🔑 Primer Inicio y Credenciales de Fábrica
+
+Al arrancar el sistema por primera vez (o tras un reseteo de fábrica), el bootloader aprovisionará el entorno con valores iniciales seguros:
+
+* **Contraseña Web inicial:** `cambiame`
+* **Llave Maestra (`MASTER_KEY`):** Se genera automáticamente con 256 bits de entropía criptográfica y se muestra en la tarjeta dorada de la pantalla de bienvenida para facilitar su copia.
+* **Ocultamiento automático:** Una vez ingresado al sistema por primera vez, el aviso de credenciales se oculta permanentemente. Las contraseñas pueden actualizarse desde la pestaña **⚙️ Ajustes** o a través de `CLI_admin.py`.
+
+---
+
+## 🛠️ Consola de Administración Fuera de Banda (`CLI_admin.py`)
+
+Para labores de rescate o administración sin necesidad de levantar el servidor web:
+
+```bash
+python CLI_admin.py
+
+```
+
+**Opciones disponibles en consola:**
+
+1. Consultar estado, puerto y variables del archivo `.env`.
+2. Modificar la contraseña de acceso (`APP_PASSWORD`).
+3. Regenerar de forma segura la Llave Maestra (`MASTER_KEY`).
+4. Purgar archivos e imágenes huérfanas en disco.
+5. Limpiar registros y archivos en cuarentena (`.corrupt_*`).
+6. Restablecer el sistema a valores de fábrica (*Factory Reset*).
+
+---
+
+## 👤 Autor
+
+Desarrollado y mantenido por **[santiagodvergara05-debug]**.
+
+```
+
+```

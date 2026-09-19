@@ -348,7 +348,7 @@ def biblioteca_novelas():
         "SELECT * FROM clips WHERE categoria IN ('Novelas', 'Borrador', 'Resumen') ORDER BY id DESC"
     ).fetchall()
     conn.close()
-    return render_template("novelas.html", resumenes=resumenes)
+    return render_template("notas.html", resumenes=resumenes)
 
 
 @clips_bp.route("/editor")

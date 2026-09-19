@@ -1,11 +1,172 @@
+{# ============================================================================== #}
+{# PCM PRIVATE CLIP MANAGER - BIBLIOTECA Y VISOR DE DOCUMENTOS V7                #}
+{# ============================================================================== #}
+
 {% extends "base.html" %}
 
 {% block title %}PCMPrivateClipManager - Biblioteca de Documentos{% endblock %}
 
 {% block extra_css %}
-<!-- KaTeX y estilos locales -->
+<!-- Motor matemático KaTeX local y estilos compartidos del módulo -->
 <link rel="stylesheet" href="{{ url_for('static', filename='css/katex.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/documentos.css') }}">
+
+<style>
+    /* Badges de clasificación rápida en tarjetas */
+    .tag-image {
+        background: rgba(168, 85, 247, 0.15) !important;
+        color: #c084fc !important;
+        border: 1px solid rgba(168, 85, 247, 0.3) !important;
+    }
+    .tag-mermaid {
+        background: rgba(56, 189, 248, 0.15) !important;
+        color: #38bdf8 !important;
+        border: 1px solid rgba(56, 189, 248, 0.3) !important;
+    }
+
+    /* Estilo de marcado de texto */
+    mark {
+        background-color: #fef08a;
+        color: #1e293b;
+        padding: 0.1em 0.3em;
+        border-radius: 3px;
+    }
+
+    /* ==========================================================================
+       PANTALLA: CONTENEDOR Y VISOR DE LECTURA (HOJA COMPLETA CONTINUA)
+       ========================================================================== */
+    .doc-modal-container {
+        height: 90vh !important;
+        max-height: 90vh !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+        background-color: #0d1117 !important;
+        border: 1px solid #30363d !important;
+        border-radius: 12px !important;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7) !important;
+    }
+
+    .doc-modal-header {
+        flex-shrink: 0 !important;
+        border-top-left-radius: 11px !important;
+        border-top-right-radius: 11px !important;
+    }
+
+    .doc-modal-body {
+        flex: 1 !important;
+        min-height: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+        background-color: #ffffff !important;
+        padding: 0 !important;
+        border-bottom-left-radius: 11px !important;
+        border-bottom-right-radius: 11px !important;
+    }
+
+    #modalDocOutput.doc-rendered-sheet {
+        flex: 1 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        background-color: #ffffff !important;
+        color: #1f2328 !important;
+        padding: 2.2rem 2.8rem !important;
+        box-sizing: border-box !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 0 11px 11px !important;
+    }
+
+    /* ==========================================================================
+       IMPRESIÓN: REGLAS PARA EXPORTACIÓN LIMPIA A PDF (PAGINACIÓN EXACTA)
+       ========================================================================== */
+    @media print {
+        body * {
+            visibility: hidden;
+        }
+
+        #modalDocPreview,
+        #modalDocPreview * {
+            visibility: visible;
+        }
+
+        .no-print,
+        .doc-modal-header {
+            display: none !important;
+        }
+
+        #modalDocPreview {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 100% !important;
+            background: #ffffff !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            display: block !important;
+            overflow: visible !important;
+        }
+
+        .doc-modal-container {
+            position: static !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            overflow: visible !important;
+        }
+
+        .doc-modal-body {
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            background: #ffffff !important;
+            display: block !important;
+        }
+
+        #modalDocOutput,
+        .doc-rendered-sheet {
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            overflow: visible !important;
+            font-size: 11pt !important;
+            line-height: 1.5 !important;
+        }
+
+        .pdf-page-break {
+            page-break-before: always !important;
+            break-before: page !important;
+            height: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            display: block !important;
+        }
+
+        @page {
+            size: A4 portrait;
+            margin: 15mm;
+        }
+    }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -71,6 +232,12 @@
                 {% if '|' in doc.contenido %}
                     <span class="tag-badge tag-table">⊞ Tabla</span>
                 {% endif %}
+                {% if '![' in doc.contenido or '<img' in doc.contenido %}
+                    <span class="tag-badge tag-image">🖼️ Imagen</span>
+                {% endif %}
+                {% if '```mermaid' in doc.contenido %}
+                    <span class="tag-badge tag-mermaid">📊 Diagrama</span>
+                {% endif %}
                 {% if '\\newpage' in doc.contenido %}
                     <span class="tag-badge tag-break">✂️ Saltos A4</span>
                 {% endif %}
@@ -78,7 +245,6 @@
             </div>
 
             <!-- Botonera de acciones -->
-<!-- Botonera de acciones sin Jinja dentro de JS -->
             <footer class="card-footer">
                 <div class="card-actions-left">
                     <button type="button" class="btn-card-action btn-preview" 
@@ -100,7 +266,7 @@
                     </button>
                     
                     <form method="POST" action="{{ url_for('clips.eliminar_documento', doc_id=doc.id) }}" 
-                          data-titulo="{{ doc.titulo }}"
+                          data-titulo="{{ doc.titulo }}" 
                           onsubmit="return confirmarEliminacion(this);">
                         <button type="submit" class="btn-card-icon btn-delete" title="Eliminar documento">
                             🗑️
@@ -122,7 +288,7 @@
     <div class="hub-empty-state">
         <div class="empty-icon">📑</div>
         <h3>No tienes documentos guardados</h3>
-        <p>Crea tu primer informe con fórmulas matemáticas KaTeX y exportación directa a PDF.</p>
+        <p>Crea tu primer informe con fórmulas matemáticas KaTeX, diagramas y exportación directa a PDF.</p>
         <a href="{{ url_for('clips.documentos_nuevo') }}" class="btn-hub-new mt-3">
             ➕ Crear Documento Ahora
         </a>
@@ -144,7 +310,7 @@
             </div>
         </header>
 
-        <!-- Hoja de visualización idéntica al editor -->
+        <!-- Contenedor con scroll vertical e independiente -->
         <div class="doc-modal-body">
             <div id="modalDocOutput" class="doc-rendered-sheet"></div>
         </div>
@@ -153,11 +319,12 @@
 {% endblock %}
 
 {% block extra_js %}
-<!-- Motores offline -->
+<!-- Librerías locales para funcionamiento offline / LAN -->
 <script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/purify.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/katex.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/marked-footnote.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mermaid.min.js') }}"></script>
 
 <script>
     if (window.marked) {
@@ -165,6 +332,24 @@
         if (typeof markedFootnote === "function") {
             marked.use(markedFootnote());
         }
+    }
+
+    if (window.mermaid) {
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'default',
+            securityLevel: 'strict',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif'
+        });
+    }
+
+    function escaparHTML(texto) {
+        return String(texto)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     // Buscador reactivo
@@ -203,13 +388,11 @@
         inputBusqueda.focus();
     }
 
-    // Confirmación de borrado
     function confirmarEliminacion(form) {
         const tit = form.getAttribute("data-titulo") || "este documento";
         return confirm(`¿Eliminar definitivamente «${tit}»?`);
     }
 
-    // Copiar Markdown desde el textarea oculto
     function copiarDocAlPortapapeles(docId, btn) {
         const area = document.getElementById("raw-doc-" + docId);
         if (!area) return;
@@ -226,72 +409,127 @@
         }
     }
 
-    // ==========================================
-    // MOTOR DE VISTA PREVIA RENDERIZADA (MODAL)
-    // ==========================================
+    // ==============================================================================
+    // MOTOR DE RENDERIZADO TOKEN SHIELD V3
+    // ==============================================================================
     const modal = document.getElementById("modalDocPreview");
     const modalTitle = document.getElementById("modalDocTitle");
     const modalOutput = document.getElementById("modalDocOutput");
+    const mermaidCache = new Map();
 
     function renderizarEnModal(rawText) {
-        const mathTokens = [];
-        const codeTokens = [];
-        const escapedDollars = [];
-        let mathIndex = 0;
-        let codeIndex = 0;
-        let dollarIndex = 0;
         let texto = rawText;
+        const nonce = Math.random().toString(36).substring(2, 8);
 
+        const codeTokens = [];
+        let codeIndex = 0;
+        const mathTokens = [];
+        let mathIndex = 0;
+        const mermaidTokens = [];
+        let mermaidIndex = 0;
+        const escapedDollars = [];
+        let dollarIndex = 0;
+        const strikethroughTokens = [];
+        let strikeIndex = 0;
+
+        const CODE_PREFIX    = `@@PCM_${nonce}_CODE_`;
+        const MATH_PREFIX    = `@@PCM_${nonce}_MATH_`;
+        const MERMAID_PREFIX = `@@PCM_${nonce}_MERMAID_`;
+        const DOLLAR_PREFIX  = `@@PCM_${nonce}_DOLLAR_`;
+        const STRIKE_PREFIX  = `@@PCM_${nonce}_STRIKE_`;
+
+        // 0. Bloques Mermaid
+        texto = texto.replace(/(?:^|\n)[ \t]*```+mermaid[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```+[ \t]*(?:\n|$)/gi, (match, diagramCode) => {
+            const key = `${MERMAID_PREFIX}${mermaidIndex++}@@`;
+            mermaidTokens.push({ key, code: diagramCode.trim() });
+            return `\n\n${key}\n\n`;
+        });
+
+        // 1. Bloques de código
         texto = texto.replace(/(```[\s\S]*?```)/g, (match) => {
-            const key = `@@CODEBLOCK_${codeIndex++}@@`;
+            const key = `${CODE_PREFIX}BLOCK_${codeIndex++}@@`;
             codeTokens.push({ key, val: match });
             return key;
         });
 
-        texto = texto.replace(/(`[^`\n]+?`)/g, (match) => {
-            const key = `@@CODEINLINE_${codeIndex++}@@`;
+        texto = texto.replace(/(?<!`)(`+)(.+?)(?<!`)\1(?!`)/g, (match) => {
+            const key = `${CODE_PREFIX}INLINE_${codeIndex++}@@`;
             codeTokens.push({ key, val: match });
             return key;
         });
 
+        // 2. Dólares escapados
         texto = texto.replace(/\\\$/g, () => {
-            const key = `@@DOLLAR_LITERAL_${dollarIndex++}@@`;
+            const key = `${DOLLAR_PREFIX}${dollarIndex++}@@`;
             escapedDollars.push({ key, val: "$" });
             return key;
         });
 
+        // 3. Salto de página para PDF
         texto = texto.replace(/(?:^|\n)[ \t]*\\newpage[ \t]*(?:\n|$)/g, '\n\n<div class="pdf-page-break"><span class="page-break-label no-print">✂️ Salto de Página</span></div>\n\n');
 
+        // 4. KaTeX bloque y entornos
         texto = texto.replace(/\$\$([\s\S]*?)\$\$/g, (match, expr) => {
-            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: true });
             return `\n\n${key}\n\n`;
         });
 
         texto = texto.replace(/(?:^|\n)[ \t]*\\\[([\s\S]*?)\\\][ \t]*(?:\n|$)/g, (match, expr) => {
-            const key = `@@MATH_BLOCK_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: true });
             return `\n\n${key}\n\n`;
         });
 
+        texto = texto.replace(/(?:^|\n)[ \t]*(\\begin\{(align\*?|gather\*?|aligned|matrix|pmatrix|bmatrix|vmatrix|cases|equation\*?)\}[\s\S]*?\\end\{\2\})[ \t]*(?:\n|$)/g, (match, expr) => {
+            const key = `${MATH_PREFIX}BLOCK_${mathIndex++}@@`;
+            mathTokens.push({ key, expr, display: true });
+            return `\n\n${key}\n\n`;
+        });
+
+        // 5. KaTeX en línea
         texto = texto.replace(/\\\(([\s\S]*?)\\\)/g, (match, expr) => {
-            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: false });
             return key;
         });
 
         texto = texto.replace(/(?<![\$\w\\])\$([^\s\$\n](?:[^\$\n]*?[^\s\$\n])?)\$(?![\$\w])/g, (match, expr) => {
-            const key = `@@MATH_INLINE_${mathIndex++}@@`;
+            const key = `${MATH_PREFIX}INLINE_${mathIndex++}@@`;
             mathTokens.push({ key, expr, display: false });
             return key;
         });
 
-        codeTokens.forEach(item => { texto = texto.replace(item.key, item.val); });
-        escapedDollars.forEach(item => { texto = texto.replace(item.key, item.val); });
+        // 5.5 Tipografía extendida
+        texto = texto.replace(/~~([^\s~](?:[\s\S]*?[^\s~])?)~~/g, (match, contenido) => {
+            const key = `${STRIKE_PREFIX}${strikeIndex++}@@`;
+            strikethroughTokens.push({ key, val: `<del>${contenido}</del>` });
+            return key;
+        });
+
+        texto = texto.replace(/(?<!=)==([^\s=](?:[^=\n]*?[^\s=])?)==(?!=)/g, '<mark>$1</mark>');
+        texto = texto.replace(/(?<!~)~([^\s~]+?)~(?!~)/g, '<sub>$1</sub>');
+        texto = texto.replace(/(?<!\^)\^([^\s\^]+?)\^(?!\^)/g, '<sup>$1</sup>');
+
+        strikethroughTokens.forEach(item => {
+            texto = texto.replace(item.key, () => item.val);
+        });
+
+        codeTokens.forEach(item => {
+            texto = texto.replace(item.key, () => item.val);
+        });
+
+        escapedDollars.forEach(item => {
+            texto = texto.replace(item.key, () => item.val);
+        });
 
         let parsedHtml = marked.parse(texto);
-        let safeHtml = DOMPurify.sanitize(parsedHtml);
+        let safeHtml = DOMPurify.sanitize(parsedHtml, {
+            ADD_TAGS: ['div', 'span', 'p', 'img', 'sub', 'sup', 'mark', 'kbd', 'details', 'summary'],
+            ADD_ATTR: ['width', 'height', 'align', 'class', 'open']
+        });
 
+        // Inyección KaTeX
         mathTokens.forEach(tok => {
             let rendered = "";
             try {
@@ -300,25 +538,75 @@
                     throwOnError: false
                 });
             } catch (err) {
-                rendered = `<span class="katex-error">${tok.expr}</span>`;
+                rendered = `<span class="katex-error">${escaparHTML(tok.expr)}</span>`;
             }
 
-            if (tok.display) {
-                const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
-                if (pWrapper.test(safeHtml)) {
-                    safeHtml = safeHtml.replace(pWrapper, `<div class="katex-display-wrapper">${rendered}</div>`);
-                } else {
-                    safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), `<div class="katex-display-wrapper">${rendered}</div>`);
-                }
+            const bloqueKaTeX = tok.display ? `<div class="katex-display-wrapper">${rendered}</div>` : rendered;
+            const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+
+            if (tok.display && pWrapper.test(safeHtml)) {
+                safeHtml = safeHtml.replace(pWrapper, () => bloqueKaTeX);
             } else {
-                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), rendered);
+                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueKaTeX);
+            }
+        });
+
+        // Inyección Mermaid
+        const diagramasACompilar = [];
+
+        mermaidTokens.forEach(tok => {
+            let bloqueMermaid = "";
+
+            if (mermaidCache.has(tok.code)) {
+                bloqueMermaid = `<div class="mermaid-diagram-wrapper">${mermaidCache.get(tok.code)}</div>`;
+            } else {
+                const codigoEscapado = tok.code
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;");
+
+                const tempId = `mermaid_target_${Math.random().toString(36).substring(2, 8)}`;
+                bloqueMermaid = `<div class="mermaid-diagram-wrapper"><div class="mermaid" id="${tempId}" data-raw-code="${encodeURIComponent(tok.code)}">${codigoEscapado}</div></div>`;
+                diagramasACompilar.push(tempId);
+            }
+
+            const pWrapper = new RegExp(`<p>\\s*${tok.key}\\s*<\\/p>`, "g");
+            if (pWrapper.test(safeHtml)) {
+                safeHtml = safeHtml.replace(pWrapper, () => bloqueMermaid);
+            } else {
+                safeHtml = safeHtml.replace(new RegExp(tok.key, "g"), () => bloqueMermaid);
             }
         });
 
         modalOutput.innerHTML = safeHtml;
+
+        if (window.mermaid && diagramasACompilar.length > 0) {
+            const nodosNuevos = diagramasACompilar
+                .map(id => document.getElementById(id))
+                .filter(el => el !== null);
+
+            if (nodosNuevos.length > 0) {
+                if (typeof mermaid.run === "function") {
+                    mermaid.run({ nodes: nodosNuevos }).then(() => {
+                        if (mermaidCache.size > 50) mermaidCache.clear();
+                        nodosNuevos.forEach(el => {
+                            const rawCode = decodeURIComponent(el.getAttribute("data-raw-code"));
+                            if (rawCode && el.parentElement) {
+                                const clon = el.cloneNode(true);
+                                clon.removeAttribute("id");
+                                clon.removeAttribute("data-raw-code");
+                                mermaidCache.set(rawCode, clon.outerHTML);
+                            }
+                        });
+                    }).catch(err => console.warn("Fallo Mermaid run:", err));
+                } else if (typeof mermaid.init === "function") {
+                    mermaid.init(undefined, nodosNuevos);
+                }
+            }
+        }
     }
 
-    // Disparadores que leen dataset sin tocar Jinja
+    // Controladores de eventos
     function abrirVistaPreviaBtn(btn) {
         const id = btn.getAttribute("data-id");
         const titulo = btn.getAttribute("data-titulo") || "Documento";
@@ -336,20 +624,26 @@
         modalTitle.textContent = titulo;
         renderizarEnModal(area.value);
         modal.style.display = "flex";
-        document.body.style.overflow = "hidden"; // Evitar scroll del fondo
+        
+        document.body.style.overflow = "hidden";
+        document.documentElement.style.overflow = "hidden";
+
+        // Ubica el scroll arriba de todo dentro de la hoja blanca
+        modalOutput.scrollTop = 0;
     }
 
     function cerrarVistaPrevia() {
         modal.style.display = "none";
         modalOutput.innerHTML = "";
+        
         document.body.style.overflow = "";
+        document.documentElement.style.overflow = "";
     }
 
     function imprimirDesdeModal() {
         window.print();
     }
 
-    // Cerrar al presionar Escape o hacer clic fuera de la ventana
     window.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && modal.style.display === "flex") {
             cerrarVistaPrevia();

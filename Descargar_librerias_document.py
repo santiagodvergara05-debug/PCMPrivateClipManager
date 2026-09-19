@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Descarga marked.js, DOMPurify, KaTeX (+ sus fuentes) y marked-footnote
-para poder usar el módulo Documentos & Math Studio 100% offline / en LAN.
+==============================================================================
+PCM PRIVATE CLIP MANAGER - GESTOR DE DEPENDENCIAS FRONTEND OFFLINE / LAN
+==============================================================================
+Descarga librerías locales en /static/js/ y /static/css/ para garantizar
+autonomía total sin conexión a Internet (Marked, DOMPurify, KaTeX + fuentes,
+Marked-Footnote, Mermaid.js y Highlight.js).
 
 Uso:
-    python descargar_librerias.py
-
-Por defecto asume que lo corrés desde la raíz del proyecto (donde están
-las carpetas static/ y templates/). Si tu script está en otro lado,
-cambiá PROJECT_ROOT más abajo.
+    python Descargar_librerias_document.py
+==============================================================================
 """
 
 import os
@@ -18,7 +19,7 @@ import urllib.request
 import urllib.error
 
 # ---------------------------------------------------------------------------
-# Configuración
+# Configuración de rutas
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -29,9 +30,11 @@ FONTS_DIR = os.path.join(CSS_DIR, "fonts")
 
 KATEX_VERSION = "0.16.9"
 DOMPURIFY_VERSION = "3.0.9"
+HIGHLIGHT_VERSION = "11.9.0"
 
-# Archivos simples: (URL, carpeta_destino, nombre_final)
+# Catálogo unificado de librerías estáticas: (URL, destino, nombre_archivo)
 ARCHIVOS = [
+    # 1. Compilación Markdown y sanitización DOM
     (
         "https://cdn.jsdelivr.net/npm/marked/marked.min.js",
         JS_DIR,
@@ -42,6 +45,7 @@ ARCHIVOS = [
         JS_DIR,
         "purify.min.js",
     ),
+    # 2. Motor matemático KaTeX
     (
         f"https://cdn.jsdelivr.net/npm/katex@{KATEX_VERSION}/dist/katex.min.js",
         JS_DIR,
@@ -52,6 +56,7 @@ ARCHIVOS = [
         CSS_DIR,
         "katex.min.css",
     ),
+    # 3. Extensiones y diagramación
     (
         "https://cdn.jsdelivr.net/npm/marked-footnote/dist/index.umd.min.js",
         JS_DIR,
@@ -62,17 +67,28 @@ ARCHIVOS = [
         JS_DIR,
         "mermaid.min.js",
     ),
+    # 4. Resaltado sintáctico de código (Highlight.js + Tema GitHub Dark)
+    (
+        f"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/{HIGHLIGHT_VERSION}/highlight.min.js",
+        JS_DIR,
+        "highlight.min.js",
+    ),
+    (
+        f"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/{HIGHLIGHT_VERSION}/styles/github-dark.min.css",
+        CSS_DIR,
+        "github-dark.min.css",
+    ),
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (descarga-librerias-script)"}
 
 
 # ---------------------------------------------------------------------------
-# Funciones
+# Rutinas de descarga
 # ---------------------------------------------------------------------------
 
 def descargar(url: str, destino_carpeta: str, nombre_archivo: str) -> str:
-    """Descarga una URL a destino_carpeta/nombre_archivo. Devuelve la ruta final."""
+    """Descarga una URL en destino_carpeta/nombre_archivo. Devuelve la ruta final."""
     os.makedirs(destino_carpeta, exist_ok=True)
     ruta_final = os.path.join(destino_carpeta, nombre_archivo)
 
@@ -93,7 +109,7 @@ def descargar(url: str, destino_carpeta: str, nombre_archivo: str) -> str:
 
 
 def descargar_fuentes_katex(ruta_css: str) -> None:
-    """Lee katex.min.css, extrae todas las referencias a fonts/... y las descarga."""
+    """Extrae referencias 'fonts/...' en katex.min.css y descarga cada variante tipográfica."""
     if not ruta_css or not os.path.exists(ruta_css):
         print("  ✗ No se pudo leer katex.min.css, se omiten las fuentes.")
         return
@@ -101,7 +117,6 @@ def descargar_fuentes_katex(ruta_css: str) -> None:
     with open(ruta_css, "r", encoding="utf-8") as f:
         contenido_css = f.read()
 
-    # Busca referencias tipo: url(fonts/KaTeX_Main-Regular.woff2)
     nombres_fuentes = sorted(set(re.findall(r'fonts/([^)"\']+)', contenido_css)))
 
     if not nombres_fuentes:
@@ -119,17 +134,20 @@ def descargar_fuentes_katex(ruta_css: str) -> None:
         else:
             fail += 1
 
-    print(f"\nFuentes: {ok} descargadas, {fail} con error.")
+    print(f"Fuentes: {ok} descargadas, {fail} con error.")
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Punto de entrada
 # ---------------------------------------------------------------------------
 
 def main():
-    print(f"Proyecto: {PROJECT_ROOT}")
-    print(f"  JS  -> {JS_DIR}")
-    print(f"  CSS -> {CSS_DIR}")
+    print("=" * 60)
+    print("  PCM - SINCRONIZADOR DE DEPENDENCIAS ESTÁTICAS OFFLINE")
+    print("=" * 60)
+    print(f"Directorio raíz: {PROJECT_ROOT}")
+    print(f"  JS    -> {JS_DIR}")
+    print(f"  CSS   -> {CSS_DIR}")
     print(f"  Fonts -> {FONTS_DIR}\n")
 
     print("Descargando librerías principales...")
@@ -141,8 +159,10 @@ def main():
 
     descargar_fuentes_katex(ruta_katex_css)
 
-    print("\nListo. Ahora actualizá templates/documentos.html para usar rutas")
-    print("locales con url_for() en lugar de los <script>/<link> del CDN.")
+    print("\n" + "=" * 60)
+    print("Sincronización finalizada con éxito.")
+    print("El sistema cuenta con todos los recursos necesarios para operar offline.")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

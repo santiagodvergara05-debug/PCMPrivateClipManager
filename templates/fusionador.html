@@ -1,6 +1,10 @@
+{# ============================================================================== #}
+{# PCM PRIVATE CLIP MANAGER - MÓDULO FUSIONADOR DE TEXTOS & PROMPTS V7          #}
+{# ============================================================================== #}
+
 {% extends "base.html" %}
 
-{% block title %}PCMPrivateClipManager - Fusionador de Prompts & Textos{% endblock %}
+{% block title %}PCMPrivateClipManager - Fusionador de Textos & Prompts{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/fusionador.css') }}">
@@ -13,15 +17,13 @@
     <div class="fusion-header">
         <div>
             <h2>🔀 Fusionador de Textos</h2>
-            <p class="section-desc">Combina instrucciones de sistema con tus entradas para modelos LLM.</p>
-            <p class="section-desc">Util en contextos donde se necesita fusionar instrucciones fijas con entradas dinámicas ej: prompts + entradas</p>
-            <p class="section-desc">Debido a una ausencia de un sistema de gestión de prompts integrado </p>
+            <p class="section-desc">Concatena texto base, directivas o plantillas fijas con entradas dinámicas en tiempo real.</p>
         </div>
 
         <!-- Switch de Auto-Copiado y Separador -->
         <div class="fusion-controls-bar">
             <div class="control-group">
-                <label class="switch-control" title="Copia el resultado combinado al portapapeles ni bien pegas o escribes">
+                <label class="switch-control" title="Copia automáticamente el resultado combinado al portapapeles tras escribir o pegar">
                     <input type="checkbox" id="checkAutoCopiar" checked>
                     <span class="switch-slider"></span>
                     <span class="switch-label">⚡ Auto-copiar al portapapeles</span>
@@ -42,19 +44,19 @@
     <!-- Panel de trabajo de doble entrada -->
     <div class="fusion-workspace">
         
-        <!-- Bloque 1: Prompt / Instrucción fija -->
+        <!-- Bloque 1: Texto base / Prefijo persistente -->
         <section class="fusion-card">
             <div class="card-topbar">
                 <div class="card-meta">
                     <span class="card-icon">📌</span>
-                    <h3>Prompt Fijo / Reglas del Sistema / texto 1</h3>
+                    <h3>Texto Base / Prefijo Fijo</h3>
                 </div>
                 <button type="button" class="btn-clear" onclick="limpiarFijo()" title="Limpiar texto fijo">
                     Limpiar
                 </button>
             </div>
             <textarea id="textoFijo" class="fusion-textarea" 
-                      placeholder="Escribe aquí tu prompt maestro (ej: 'Actúa como un traductor profesional, responde solo en español neutro...'). Se guarda automáticamente." 
+                      placeholder="Escribe aquí tu plantilla, directiva de sistema o prefijo recurrente. Se conserva guardado localmente de forma persistente." 
                       spellcheck="false"></textarea>
             <div class="card-statusbar">
                 <span id="statsFijo">0 pal. · 0 car.</span>
@@ -67,14 +69,14 @@
             <div class="card-topbar">
                 <div class="card-meta">
                     <span class="card-icon">📥</span>
-                    <h3>Entrada Dinámica / Consulta / texto 2</h3>
+                    <h3>Contenido Dinámico / Entrada Rápida</h3>
                 </div>
-                <button type="button" class="btn-clear" onclick="limpiarEntrada()" title="Limpiar consulta">
+                <button type="button" class="btn-clear" onclick="limpiarEntrada()" title="Limpiar contenido de entrada">
                     Limpiar
                 </button>
             </div>
             <textarea id="textoEntrada" class="fusion-textarea" 
-                      placeholder="Pega o escribe aquí el texto o pregunta que vas a enviar. se fusionará automáticamente con el prompt fijo. Se borrará al cerrar la sección o recargar la página." 
+                      placeholder="Pega o escribe aquí los datos variables o la consulta. Se fusionará automáticamente al instante con el texto fijo. Es volátil (se vacía al recargar)." 
                       spellcheck="false" autofocus></textarea>
             <div class="card-statusbar">
                 <span id="statsEntrada">0 pal. · 0 car.</span>
@@ -89,7 +91,7 @@
         <div class="card-topbar">
             <div class="card-meta">
                 <span class="card-icon">📋</span>
-                <h3>Resultado Fusionado Listo</h3>
+                <h3>Resultado Combinado</h3>
             </div>
             <div class="result-actions">
                 <button type="button" class="btn-tool-action expand" onclick="abrirModalExpandir()" title="Ver en pantalla completa">
@@ -101,7 +103,7 @@
             </div>
         </div>
         <textarea id="textoResultado" class="fusion-textarea result-textarea" readonly 
-                  placeholder="El texto fusionado aparecerá aquí..."></textarea>
+                  placeholder="El texto combinado aparecerá aquí automáticamente..."></textarea>
         <div class="card-statusbar">
             <span id="statsResultado">Total: 0 palabras · 0 caracteres</span>
             <div id="toastFeedback" class="toast-feedback" style="display: none;">
@@ -141,186 +143,260 @@
 
 {% block extra_js %}
 <script>
-    const textoFijo = document.getElementById("textoFijo");
-    const textoEntrada = document.getElementById("textoEntrada");
-    const textoResultado = document.getElementById("textoResultado");
-    const textoResultadoModal = document.getElementById("textoResultadoModal");
-    const checkAutoCopiar = document.getElementById("checkAutoCopiar");
-    const selectSeparador = document.getElementById("selectSeparador");
-    const btnCopiarManual = document.getElementById("btnCopiarManual");
-    const btnCopiarModal = document.getElementById("btnCopiarModal");
-    const toast = document.getElementById("toastFeedback");
-    const modalExpandir = document.getElementById("modalExpandirFusion");
+/**
+ * ==============================================================================
+ * PCM PRIVATE CLIP MANAGER - CONTROLADOR DE FUSIÓN REACTIVA (FUSIONADOR.JS)
+ * ==============================================================================
+ * Responsabilidades:
+ * 1. Gestión reactiva de concatenación de búferes de texto (Fijo + Variable).
+ * 2. Persistencia automática del texto base en LocalStorage.
+ * 3. Telemetría de palabras y caracteres en tiempo real.
+ * 4. Intercepción de portapapeles universal con disparo automático (Auto-copy).
+ * 5. Visor modal ampliado con bloqueo seguro de scroll vertical.
+ * ==============================================================================
+ */
 
-    const statsFijo = document.getElementById("statsFijo");
-    const statsEntrada = document.getElementById("statsEntrada");
-    const statsResultado = document.getElementById("statsResultado");
-    const statsModalResultado = document.getElementById("statsModalResultado");
+/* ==============================================================================
+   SECCIÓN 1: DECLARACIÓN DE SELECTORES DEL DOM
+   ============================================================================== */
+const textoFijo = document.getElementById("textoFijo");
+const textoEntrada = document.getElementById("textoEntrada");
+const textoResultado = document.getElementById("textoResultado");
+const textoResultadoModal = document.getElementById("textoResultadoModal");
+const checkAutoCopiar = document.getElementById("checkAutoCopiar");
+const selectSeparador = document.getElementById("selectSeparador");
+const btnCopiarManual = document.getElementById("btnCopiarManual");
+const btnCopiarModal = document.getElementById("btnCopiarModal");
+const toast = document.getElementById("toastFeedback");
+const modalExpandir = document.getElementById("modalExpandirFusion");
 
-    // 1. Cargar preferencias y prompt persistente
-    document.addEventListener("DOMContentLoaded", () => {
-        const guardado = localStorage.getItem("pcm_prompt_fijo");
-        if (guardado) {
-            textoFijo.value = guardado;
-        }
+const statsFijo = document.getElementById("statsFijo");
+const statsEntrada = document.getElementById("statsEntrada");
+const statsResultado = document.getElementById("statsResultado");
+const statsModalResultado = document.getElementById("statsModalResultado");
 
-        const autoCopyPref = localStorage.getItem("pcm_autocopy_pref");
-        if (autoCopyPref !== null) {
-            checkAutoCopiar.checked = autoCopyPref === "true";
-        }
-
-        actualizarFusion(false);
-    });
-
-    checkAutoCopiar.addEventListener("change", () => {
-        localStorage.setItem("pcm_autocopy_pref", checkAutoCopiar.checked);
-    });
-
-    // 2. Métricas
-    function obtenerMetricas(txt) {
-        const palabras = txt.trim() === "" ? 0 : txt.trim().split(/\s+/).length;
-        const caracteres = txt.length;
-        return { palabras, caracteres };
+/* ==============================================================================
+   SECCIÓN 2: INICIALIZACIÓN Y PERSISTENCIA DE PREFERENCIAS (LOCALSTORAGE)
+   ============================================================================== */
+document.addEventListener("DOMContentLoaded", () => {
+    // 1. Restaurar plantilla o texto fijo previo
+    const promptGuardado = localStorage.getItem("pcm_prompt_fijo");
+    if (promptGuardado !== null) {
+        textoFijo.value = promptGuardado;
     }
 
-    // 3. Fusión de texto
-    function actualizarFusion(permitirAutoCopiado = true) {
-        const fijo = textoFijo.value.trim();
-        const entrada = textoEntrada.value.trim();
-
-        localStorage.setItem("pcm_prompt_fijo", textoFijo.value);
-
-        let sep = "\n\n";
-        if (selectSeparador.value === "simple") sep = "\n";
-        if (selectSeparador.value === "espacio") sep = " ";
-
-        let resultado = "";
-        if (fijo && entrada) {
-            resultado = `${fijo}${sep}${entrada}`;
-        } else if (fijo) {
-            resultado = fijo;
-        } else {
-            resultado = entrada;
-        }
-
-        textoResultado.value = resultado;
-        if (textoResultadoModal) {
-            textoResultadoModal.value = resultado;
-        }
-
-        const mFijo = obtenerMetricas(textoFijo.value);
-        statsFijo.textContent = `${mFijo.palabras} pal. · ${mFijo.caracteres} car.`;
-
-        const mEntrada = obtenerMetricas(textoEntrada.value);
-        statsEntrada.textContent = `${mEntrada.palabras} pal. · ${mEntrada.caracteres} car.`;
-
-        const mRes = obtenerMetricas(resultado);
-        const textoStats = `Total: ${mRes.palabras} palabras · ${mRes.caracteres} caracteres`;
-        statsResultado.textContent = textoStats;
-        if (statsModalResultado) {
-            statsModalResultado.textContent = textoStats;
-        }
-
-        if (permitirAutoCopiado && checkAutoCopiar.checked && resultado && entrada) {
-            copiarAlPortapapelesDirecto(resultado);
-        }
+    // 2. Restaurar preferencia del switch de auto-copiado
+    const autoCopyPref = localStorage.getItem("pcm_autocopy_pref");
+    if (autoCopyPref !== null) {
+        checkAutoCopiar.checked = (autoCopyPref === "true");
     }
 
-    textoFijo.addEventListener("input", () => actualizarFusion(false));
-    selectSeparador.addEventListener("change", () => actualizarFusion(false));
+    // 3. Ejecutar primera pasada de fusión sin disparar auto-copiado al cargar
+    actualizarFusion(false);
+});
 
-    textoEntrada.addEventListener("input", () => actualizarFusion(true));
-    textoEntrada.addEventListener("paste", () => {
-        setTimeout(() => actualizarFusion(true), 20);
-    });
+// Guardar preferencia del usuario cada vez que conmuta el switch
+checkAutoCopiar.addEventListener("change", () => {
+    localStorage.setItem("pcm_autocopy_pref", checkAutoCopiar.checked);
+});
 
-    // 4. Copiado universal con feedback
-    function mostrarToast() {
-        toast.style.display = "inline-block";
-        setTimeout(() => {
-            toast.style.display = "none";
-        }, 1500);
+/* ==============================================================================
+   SECCIÓN 3: CÓMPUTO DE MÉTRICAS TIPOGRÁFICAS
+   ============================================================================== */
+/**
+ * Calcula palabras y caracteres de una cadena de texto dada.
+ * Maneja cadenas vacías sin contar falsas palabras iniciales.
+ */
+function obtenerMetricas(txt) {
+    const palabras = txt.trim() === "" ? 0 : txt.trim().split(/\s+/).length;
+    const caracteres = txt.length;
+    return { palabras, caracteres };
+}
+
+/* ==============================================================================
+   SECCIÓN 4: MOTOR DE CONCATENACIÓN Y FUSIÓN DE TEXTO
+   ============================================================================== */
+/**
+ * Ensambla el texto fijo con la entrada dinámica según el separador seleccionado.
+ * @param {boolean} permitirAutoCopiado - Determina si debe disparar el clipboard.
+ */
+function actualizarFusion(permitirAutoCopiado = true) {
+    const fijo = textoFijo.value.trim();
+    const entrada = textoEntrada.value.trim();
+
+    // Persistir el texto base para la próxima sesión
+    localStorage.setItem("pcm_prompt_fijo", textoFijo.value);
+
+    // Determinar delimitador seleccionado
+    let sep = "\n\n";
+    if (selectSeparador.value === "simple") sep = "\n";
+    if (selectSeparador.value === "espacio") sep = " ";
+
+    // Ensamblar resultado según disponibilidad de entradas
+    let resultado = "";
+    if (fijo && entrada) {
+        resultado = `${fijo}${sep}${entrada}`;
+    } else if (fijo) {
+        resultado = fijo;
+    } else {
+        resultado = entrada;
     }
 
-    function copiarAlPortapapelesDirecto(txt) {
-        if (!txt) return;
+    // Actualizar áreas de texto
+    textoResultado.value = resultado;
+    if (textoResultadoModal) {
+        textoResultadoModal.value = resultado;
+    }
 
-        if (window.copiarTextoUniversal) {
-            window.copiarTextoUniversal(txt, null);
-            mostrarToast();
-            return;
-        }
+    // Actualizar métricas del panel fijo
+    const mFijo = obtenerMetricas(textoFijo.value);
+    statsFijo.textContent = `${mFijo.palabras} pal. · ${mFijo.caracteres} car.`;
 
-        const aux = document.createElement("textarea");
-        aux.value = txt;
-        aux.setAttribute("readonly", "");
-        aux.style.position = "absolute";
-        aux.style.left = "-9999px";
-        document.body.appendChild(aux);
-        aux.select();
-        document.execCommand("copy");
-        document.body.removeChild(aux);
+    // Actualizar métricas del panel dinámico
+    const mEntrada = obtenerMetricas(textoEntrada.value);
+    statsEntrada.textContent = `${mEntrada.palabras} pal. · ${mEntrada.caracteres} car.`;
+
+    // Actualizar métricas de salida combinada
+    const mRes = obtenerMetricas(resultado);
+    const textoStats = `Total: ${mRes.palabras} palabras · ${mRes.caracteres} caracteres`;
+    statsResultado.textContent = textoStats;
+    if (statsModalResultado) {
+        statsModalResultado.textContent = textoStats;
+    }
+
+    // Disparar auto-copiado si la entrada contiene contenido nuevo
+    if (permitirAutoCopiado && checkAutoCopiar.checked && resultado && entrada) {
+        copiarAlPortapapelesDirecto(resultado);
+    }
+}
+
+// Escuchas de eventos para regeneración en tiempo real
+textoFijo.addEventListener("input", () => actualizarFusion(false));
+selectSeparador.addEventListener("change", () => actualizarFusion(false));
+
+textoEntrada.addEventListener("input", () => actualizarFusion(true));
+textoEntrada.addEventListener("paste", () => {
+    // Micro-pausa para permitir que el navegador vuelque el portapapeles en el textarea
+    setTimeout(() => actualizarFusion(true), 20);
+});
+
+/* ==============================================================================
+   SECCIÓN 5: SUBSISTEMA DE PORTAPAPELES Y NOTIFICACIONES
+   ============================================================================== */
+/**
+ * Muestra el aviso temporal de copiado automático exitoso.
+ */
+function mostrarToast() {
+    toast.style.display = "inline-block";
+    setTimeout(() => {
+        toast.style.display = "none";
+    }, 1500);
+}
+
+/**
+ * Rutina universal de copiado con tolerancia para entornos LAN (HTTP sin SSL).
+ */
+function copiarAlPortapapelesDirecto(txt) {
+    if (!txt) return;
+
+    if (window.copiarTextoUniversal) {
+        window.copiarTextoUniversal(txt, null);
         mostrarToast();
+        return;
     }
 
-    function copiarFusionManual() {
-        if (textoResultado.value.trim()) {
-            copiarAlPortapapelesDirecto(textoResultado.value);
-            const prev = btnCopiarManual.innerText;
-            btnCopiarManual.innerText = "✓ Copiado";
-            setTimeout(() => {
-                btnCopiarManual.innerText = prev;
-            }, 1200);
-        }
-    }
+    // Fallback estándar en navegadores compatibles
+    const aux = document.createElement("textarea");
+    aux.value = txt;
+    aux.setAttribute("readonly", "");
+    aux.style.position = "absolute";
+    aux.style.left = "-9999px";
+    document.body.appendChild(aux);
+    aux.select();
+    document.execCommand("copy");
+    document.body.removeChild(aux);
+    mostrarToast();
+}
 
-    function copiarFusionModal() {
-        if (textoResultadoModal.value.trim()) {
-            copiarAlPortapapelesDirecto(textoResultadoModal.value);
-            const prev = btnCopiarModal.innerText;
-            btnCopiarModal.innerText = "✓ Copiado";
-            setTimeout(() => {
-                btnCopiarModal.innerText = prev;
-            }, 1200);
-        }
-    }
-
-    // 5. Modal Expandir
-    function abrirModalExpandir() {
-        textoResultadoModal.value = textoResultado.value;
-        statsModalResultado.textContent = statsResultado.textContent;
-        modalExpandir.style.display = "flex";
+/**
+ * Disparador de copiado manual desde la tarjeta principal.
+ */
+function copiarFusionManual() {
+    if (textoResultado.value.trim()) {
+        copiarAlPortapapelesDirecto(textoResultado.value);
+        const original = btnCopiarManual.innerText;
+        btnCopiarManual.innerText = "✓ Copiado";
         setTimeout(() => {
-            textoResultadoModal.scrollTop = 0;
-        }, 30);
+            btnCopiarManual.innerText = original;
+        }, 1200);
     }
+}
 
-    function cerrarModalExpandir() {
-        modalExpandir.style.display = "none";
+/**
+ * Disparador de copiado manual desde la vista expandida modal.
+ */
+function copiarFusionModal() {
+    if (textoResultadoModal.value.trim()) {
+        copiarAlPortapapelesDirecto(textoResultadoModal.value);
+        const original = btnCopiarModal.innerText;
+        btnCopiarModal.innerText = "✓ Copiado";
+        setTimeout(() => {
+            btnCopiarModal.innerText = original;
+        }, 1200);
     }
+}
 
-    window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") cerrarModalExpandir();
-    });
+/* ==============================================================================
+   SECCIÓN 6: GESTIÓN DE MODAL EXPANDIDO Y EVENTOS GLOBALES
+   ============================================================================== */
+function abrirModalExpandir() {
+    textoResultadoModal.value = textoResultado.value;
+    statsModalResultado.textContent = statsResultado.textContent;
+    modalExpandir.style.display = "flex";
+    
+    // Bloquear scroll del fondo
+    document.body.style.overflow = "hidden";
+    
+    setTimeout(() => {
+        textoResultadoModal.scrollTop = 0;
+    }, 30);
+}
 
-    modalExpandir.addEventListener("click", (e) => {
-        if (e.target.id === "modalExpandirFusion") cerrarModalExpandir();
-    });
+function cerrarModalExpandir() {
+    modalExpandir.style.display = "none";
+    document.body.style.overflow = "";
+}
 
-    // 6. Limpiezas
-    function limpiarEntrada() {
-        textoEntrada.value = "";
+// Cierre mediante tecla Escape
+window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modalExpandir.style.display === "flex") {
+        cerrarModalExpandir();
+    }
+});
+
+// Cierre al pulsar sobre el fondo oscuro exterior
+modalExpandir.addEventListener("click", (e) => {
+    if (e.target.id === "modalExpandirFusion") {
+        cerrarModalExpandir();
+    }
+});
+
+/* ==============================================================================
+   SECCIÓN 7: RUTINAS DE VACIADO Y LIMPIEZA
+   ============================================================================== */
+function limpiarEntrada() {
+    textoEntrada.value = "";
+    actualizarFusion(false);
+    textoEntrada.focus();
+}
+
+function limpiarFijo() {
+    if (confirm("¿Vaciar el texto base fijo? Esta acción borrará el dato guardado en este equipo.")) {
+        textoFijo.value = "";
+        localStorage.removeItem("pcm_prompt_fijo");
         actualizarFusion(false);
-        textoEntrada.focus();
+        textoFijo.focus();
     }
-
-    function limpiarFijo() {
-        if (confirm("¿Vaciar el texto fijo?")) {
-            textoFijo.value = "";
-            localStorage.removeItem("pcm_prompt_fijo");
-            actualizarFusion(false);
-            textoFijo.focus();
-        }
-    }
+}
 </script>
 {% endblock %}

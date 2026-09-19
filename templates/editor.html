@@ -1,9 +1,60 @@
+{# ============================================================================== #}
+{# PCM PRIVATE CLIP MANAGER - REDACTOR DE NOTAS & BORRADORES (EDITOR.HTML)       #}
+{# ============================================================================== #}
+
 {% extends "base.html" %}
 
-{% block title %}{% if clip %}Editar: {{ clip.titulo }}{% else %}Nuevo Borrador{% endif %} - ClipTemp{% endblock %}
+{% block title %}PCMPrivateClipManager - {% if clip %}Editar: {{ clip.titulo }}{% else %}Nueva Nota / Borrador{% endif %}{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/editor.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/github-dark.min.css') }}">
+
+<style>
+    /* Ajustes visuales para el visor Markdown integrado */
+    .markdown-rendered-view {
+        background-color: #0d1117;
+        color: #c9d1d9;
+        padding: 1.5rem;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        min-height: 400px;
+        line-height: 1.6;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        overflow-y: auto;
+        word-break: break-word;
+    }
+    .markdown-rendered-view h1,
+    .markdown-rendered-view h2,
+    .markdown-rendered-view h3 {
+        color: #f0f6fc;
+        border-bottom: 1px solid #21262d;
+        padding-bottom: 0.3rem;
+        margin-top: 1.2rem;
+    }
+    .markdown-rendered-view pre {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.8rem;
+        overflow-x: auto;
+    }
+    .markdown-rendered-view code {
+        background-color: rgba(110, 118, 129, 0.2);
+        padding: 0.15rem 0.3rem;
+        border-radius: 4px;
+        font-size: 0.9em;
+    }
+    .markdown-rendered-view pre code {
+        background: transparent;
+        padding: 0;
+    }
+    .active-preview {
+        background-color: #1f6feb !important;
+        border-color: #388bfd !important;
+        color: #ffffff !important;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -13,24 +64,27 @@
             <input type="hidden" name="clip_id" value="{{ clip.id }}">
         {% endif %}
 
-        <!-- Barra superior: Controles, alternador Markdown y Título -->
+        <!-- BARRA SUPERIOR: CONTROLES, NAVEGACIÓN Y ACCIONES RÁPIDAS -->
         <div class="editor-toolbar">
             <div class="editor-top-bar">
-                <a href="{{ url_for('clips.biblioteca_novelas') }}" class="btn-tool btn-back">
-                    ← Volver a Biblioteca
+                <a href="{{ url_for('clips.biblioteca_novelas') }}" class="btn-tool btn-back" title="Regresar al listado de notas">
+                    ← Volver al Bloc de Notas
                 </a>
 
                 <div class="editor-actions">
                     <button type="button" id="btnTogglePreview" class="btn-tool btn-preview-toggle" onclick="alternarVistaMarkdown()">
                         👁️ Vista Previa
                     </button>
+                    <button type="button" class="btn-tool" onclick="cargarEjemploEstres()" title="Cargar texto de prueba de estrés e instrucciones">
+                        🧪 Ejemplo
+                    </button>
                     <button type="button" class="btn-tool" onclick="copiarTitulo(this)" title="Copiar solo el título">
                         🏷️ Copiar Título
                     </button>
-                    <button type="button" class="btn-tool" onclick="copiarTodo(this)" title="Copiar todo el contenido">
+                    <button type="button" class="btn-tool" onclick="copiarTodo(this)" title="Copiar todo el contenido del texto">
                         📋 Copiar Contenido
                     </button>
-                    <button type="button" class="btn-tool" onclick="descargarTxt()" title="Descargar archivo .txt">
+                    <button type="button" class="btn-tool" onclick="descargarTexto()" title="Descargar como archivo de texto">
                         💾 Descargar
                     </button>
                     <button type="submit" id="btnGuardar" class="btn-save-main">
@@ -39,11 +93,14 @@
                 </div>
             </div>
 
-<!-- Selector de Tipo + Título con ancho flexible -->
+            <!-- SELECTOR DE CLASIFICACIÓN Y CAMPO DE TÍTULO -->
             <div class="editor-title-wrap">
-                <select name="tipo_doc" class="editor-type-select">
-                    <option value="Borrador" {% if not clip or clip.categoria != 'Resumen' %}selected{% endif %}>📝 Borrador</option>
+                <select id="tipoDocSelect" name="tipo_doc" class="editor-type-select" title="Clasificación del texto" onchange="actualizarModoEditor()">
+                    <option value="Nota" {% if clip and clip.categoria == 'Nota' %}selected{% endif %}>📝 Nota</option>
+                    <option value="Borrador" {% if not clip or clip.categoria == 'Borrador' %}selected{% endif %}>🚧 Borrador</option>
                     <option value="Resumen" {% if clip and clip.categoria == 'Resumen' %}selected{% endif %}>📑 Resumen</option>
+                    <option value="Apuntes" {% if clip and clip.categoria == 'Apuntes' %}selected{% endif %}>🎓 Apuntes</option>
+                    <option value="Texto Plano" {% if clip and clip.categoria in ['Texto Plano', 'Bloc de Notas'] %}selected{% endif %}>📄 Bloc de Notas (Texto Plano)</option>
                 </select>
 
                 <input type="text" id="editorTitulo" name="titulo" class="editor-title-input" 
@@ -52,18 +109,18 @@
             </div>
         </div>
 
-        <!-- Área de redacción y lectura dual -->
+        <!-- ÁREA DE ESCRITURA Y VISOR DE LECTURA DUAL -->
         <div class="editor-body-wrap">
             <!-- Modo Editor -->
             <textarea id="editorContenido" name="contenido" class="editor-textarea" 
-                      placeholder="Escribe o pega aquí tu texto en Markdown (**negrita**, # títulos, - listas)..." 
+                      placeholder="Escribe o pega aquí tu texto..." 
                       required autofocus>{{ clip.contenido if clip else '' }}</textarea>
 
             <!-- Modo Vista Previa Markdown (Oculto por defecto) -->
             <div id="markdownPreview" class="markdown-rendered-view" style="display: none;"></div>
         </div>
 
-        <!-- Barra inferior con métricas -->
+        <!-- BARRA INFERIOR: TELEMETRÍA TIPOGRÁFICA Y ESTADO -->
         <div class="editor-statusbar">
             <div class="stats-group">
                 <span id="statPalabras">0 palabras</span>
@@ -74,104 +131,338 @@
                 <span class="stat-sep">·</span>
                 <span id="statTiempo">~0 min lectura</span>
             </div>
-            <div class="save-status" id="saveStatus">Listo</div>
+            <div class="save-status" id="saveStatus">🟢 Listo</div>
         </div>
     </form>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<!-- Librerías locales descargadas (100% Offline / LAN) -->
+<script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/purify.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/highlight.min.js') }}"></script>
+
 <script>
-    const textarea = document.getElementById("editorContenido");
-    const previewArea = document.getElementById("markdownPreview");
-    const btnToggle = document.getElementById("btnTogglePreview");
-    const statPalabras = document.getElementById("statPalabras");
-    const statCaracteres = document.getElementById("statCaracteres");
-    const statLineas = document.getElementById("statLineas");
-    const statTiempo = document.getElementById("statTiempo");
-    const form = document.getElementById("editorForm");
+/**
+ * ==============================================================================
+ * PCM PRIVATE CLIP MANAGER - CONTROLADOR DEL EDITOR DE NOTAS (EDITOR.JS)
+ * ==============================================================================
+ */
 
-    let enModoPreview = false;
+const textarea = document.getElementById("editorContenido");
+const previewArea = document.getElementById("markdownPreview");
+const btnToggle = document.getElementById("btnTogglePreview");
+const selectTipo = document.getElementById("tipoDocSelect");
 
-    if (window.marked) {
-        marked.setOptions({ breaks: true, gfm: true });
-    }
+const statPalabras = document.getElementById("statPalabras");
+const statCaracteres = document.getElementById("statCaracteres");
+const statLineas = document.getElementById("statLineas");
+const statTiempo = document.getElementById("statTiempo");
+const form = document.getElementById("editorForm");
+const saveStatus = document.getElementById("saveStatus");
 
-    function alternarVistaMarkdown() {
-        enModoPreview = !enModoPreview;
-        if (enModoPreview) {
-            previewArea.innerHTML = marked.parse(textarea.value);
-            textarea.style.display = "none";
-            previewArea.style.display = "block";
-            btnToggle.innerHTML = "✏️ Volver al Editor";
-            btnToggle.classList.add("active-preview");
-        } else {
-            previewArea.style.display = "none";
-            textarea.style.display = "block";
-            textarea.focus();
-            btnToggle.innerHTML = "👁️ Vista Previa";
-            btnToggle.classList.remove("active-preview");
-        }
-    }
+let enModoPreview = false;
 
-    // Cálculo métrico asegurado
-    function actualizarMetricas() {
-        const texto = textarea.value;
-        const caracteres = texto.length;
-        const palabras = texto.trim() === "" ? 0 : texto.trim().split(/\s+/).length;
-        const lineas = texto === "" ? 0 : texto.split("\n").length;
-        
-        // 200 palabras por minuto
-        const minutosLectura = palabras === 0 ? 0 : Math.max(1, Math.ceil(palabras / 200));
-
-        statPalabras.textContent = `${palabras.toLocaleString()} palabras`;
-        statCaracteres.textContent = `${caracteres.toLocaleString()} car.`;
-        statLineas.textContent = `${lineas} líneas`;
-        statTiempo.textContent = `~${minutosLectura} min lectura`;
-    }
-
-    textarea.addEventListener("input", actualizarMetricas);
-    actualizarMetricas();
-
-    // Guardado rápido
-    window.addEventListener("keydown", function(e) {
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-            e.preventDefault();
-            document.getElementById("saveStatus").textContent = "Guardando...";
-            form.submit();
-        }
+// Configuración offline de Marked
+if (window.marked) {
+    marked.setOptions({
+        breaks: true,
+        gfm: true
     });
+}
 
-    // Copiado compatible con LAN
-    function copiarTitulo(btn) {
-        const inputTitulo = document.getElementById("editorTitulo");
-        if (inputTitulo && inputTitulo.value.trim()) {
-            window.copiarTextoUniversal(inputTitulo.value, btn);
+/**
+ * Conmuta entre soporte Markdown o modo Texto Plano tipo Notepad de Windows
+ */
+function actualizarModoEditor() {
+    const esTextoPlano = (selectTipo.value === "Texto Plano" || selectTipo.value === "Bloc de Notas");
+
+    if (esTextoPlano) {
+        if (enModoPreview) {
+            alternarVistaMarkdown();
         }
+        btnToggle.style.display = "none";
+        textarea.placeholder = "Escribe aquí texto sin formato (modo Bloc de notas clásico)...";
+    } else {
+        btnToggle.style.display = "inline-flex";
+        textarea.placeholder = "Escribe o pega aquí tu texto en Markdown (**negrita**, # títulos, - listas)...";
     }
+}
 
-    function copiarTodo(btn) {
-        if (textarea.value.trim()) {
-            window.copiarTextoUniversal(textarea.value, btn);
+function alternarVistaMarkdown() {
+    // Si está en modo texto plano, no procesar Markdown
+    if (selectTipo.value === "Texto Plano") return;
+
+    enModoPreview = !enModoPreview;
+    if (enModoPreview) {
+        const rawHtml = marked.parse(textarea.value);
+        const safeHtml = DOMPurify.sanitize(rawHtml);
+        previewArea.innerHTML = safeHtml;
+
+        if (window.hljs) {
+            previewArea.querySelectorAll("pre code").forEach((bloque) => {
+                hljs.highlightElement(bloque);
+            });
         }
+
+        textarea.style.display = "none";
+        previewArea.style.display = "block";
+        btnToggle.innerHTML = "✏️ Volver al Editor";
+        btnToggle.classList.add("active-preview");
+    } else {
+        previewArea.style.display = "none";
+        textarea.style.display = "block";
+        textarea.focus();
+        btnToggle.innerHTML = "👁️ Vista Previa";
+        btnToggle.classList.remove("active-preview");
+    }
+}
+
+function actualizarMetricas() {
+    const texto = textarea.value;
+    const caracteres = texto.length;
+    const palabras = texto.trim() === "" ? 0 : texto.trim().split(/\s+/).length;
+    const lineas = texto === "" ? 0 : texto.split("\n").length;
+    const minutosLectura = palabras === 0 ? 0 : Math.max(1, Math.ceil(palabras / 200));
+
+    statPalabras.textContent = `${palabras.toLocaleString()} palabras`;
+    statCaracteres.textContent = `${caracteres.toLocaleString()} car.`;
+    statLineas.textContent = `${lineas} líneas`;
+    statTiempo.textContent = `~${minutosLectura} min lectura`;
+}
+
+textarea.addEventListener("input", () => {
+    actualizarMetricas();
+    saveStatus.textContent = "🟡 Cambios sin guardar";
+});
+
+// Soporte de indentación con Tabulador
+textarea.addEventListener("keydown", function(e) {
+    if (e.key === "Tab") {
+        e.preventDefault();
+        const start = this.selectionStart;
+        const end = this.selectionEnd;
+        this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+        this.selectionStart = this.selectionEnd = start + 4;
+        actualizarMetricas();
+    }
+});
+
+function copiarTitulo(btn) {
+    const inputTitulo = document.getElementById("editorTitulo");
+    if (!inputTitulo || !inputTitulo.value.trim()) return;
+
+    if (window.copiarTextoUniversal) {
+        window.copiarTextoUniversal(inputTitulo.value, btn);
+    } else {
+        navigator.clipboard.writeText(inputTitulo.value).then(() => {
+            const original = btn.innerText;
+            btn.innerText = "✓ Copiado";
+            setTimeout(() => btn.innerText = original, 1200);
+        });
+    }
+}
+
+function copiarTodo(btn) {
+    if (!textarea.value.trim()) return;
+
+    if (window.copiarTextoUniversal) {
+        window.copiarTextoUniversal(textarea.value, btn);
+    } else {
+        navigator.clipboard.writeText(textarea.value).then(() => {
+            const original = btn.innerText;
+            btn.innerText = "✓ Copiado";
+            setTimeout(() => btn.innerText = original, 1200);
+        });
+    }
+}
+
+function descargarTexto() {
+    const inputTitulo = document.getElementById("editorTitulo");
+    const nombreBase = (inputTitulo ? inputTitulo.value.trim() : "") || "nota";
+    const extension = (selectTipo.value === "Texto Plano") ? "txt" : "md";
+    const nombreArchivo = `${nombreBase.replace(/[/\\?%*:|"<>]/g, '_')}.${extension}`;
+
+    const blob = new Blob([textarea.value], { type: "text/plain;charset=utf-8" });
+    const enlace = document.createElement("a");
+    enlace.href = URL.createObjectURL(blob);
+    enlace.download = nombreArchivo;
+    document.body.appendChild(enlace);
+    enlace.click();
+    document.body.removeChild(enlace);
+    URL.revokeObjectURL(enlace.href);
+}
+
+// Atajo Ctrl + S
+window.addEventListener("keydown", function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        saveStatus.textContent = "⏳ Guardando...";
+        form.submit();
+    }
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+    actualizarModoEditor();
+    actualizarMetricas();
+});
+
+
+/* ==============================================================================
+   PLANTILLA DE PRUEBA DE ESTRÉS, INSTRUCCIONES Y LIMITACIONES TÉCNICAS
+   ============================================================================== */
+const TEXTO_EJEMPLO_ESTRES = `# 🧪 Batería de Prueba de Estrés & Manual Operativo: Bloc de Notas
+
+Documento de validación sintáctica, directivas de uso y verificación de límites técnicos para el entorno de redacción de **PCMPrivateClipManager**.
+
+---
+
+## 📌 1. Propósito y Clasificación de Categorías
+
+Este módulo está optimizado para la redacción continua de textos medianos y largos. Dispone de **5 categorías especializadas**:
+
+1. **📝 Nota:** Anotaciones rápidas, recordatorios, listas de tareas o fragmentos de texto temporal.
+2. **🚧 Borrador:** Artículos extensos, capítulos de lectura, novelas o documentación en desarrollo continuo.
+3. **📑 Resumen:** Síntesis ejecutivas de artículos, papers o resúmenes de libros.
+4. **🎓 Apuntes:** Fichas de estudio, conceptos teóricos y clases estructuradas.
+5. **📄 Bloc de Notas (Texto Plano):** Entorno idéntico al Notepad clásico de Windows.
+
+---
+
+## ⚠️ 2. Limitaciones Técnicas y Restricciones del Entorno
+
+Para garantizar máxima velocidad, ligereza y persistencia sin dependencias complejas, este módulo aplica deliberadamente los siguientes límites:
+
+* 🚫 **Sin soporte de imágenes multimedia:** Este editor no dispone de servidor de subida ni procesador de imágenes adjuntas. Si necesitas incrustar diagramas visuales o capturas, utiliza el módulo **📑 Documentos & Math**.
+* 🚫 **Sin motor KaTeX ni Mermaid:** Las fórmulas matemáticas complejas en LaTeX ($\$...\$$) y los diagramas gráficos (\`\`\`mermaid) **no se renderizan** aquí para no ralentizar la escritura rápida.
+* ⚙️ **Comportamiento del modo «📄 Bloc de Notas»:** Al seleccionar la opción *Bloc de Notas (Texto Plano)* en el menú desplegable superior:
+  * El motor Markdown se **desactiva por completo**.
+  * El botón **👁️ Vista Previa desaparece** automáticamente.
+  * El archivo se exportará como archivo crudo \`.txt\` en lugar de \`.md\`.
+
+---
+
+## ⚡ 3. Atajos de Teclado y Métricas Integradas
+
+* <kbd>Ctrl</kbd> + <kbd>S</kbd>: Guarda de forma inmediata el título, la categoría y el cuerpo de la nota en la base de datos local SQLite.
+* <kbd>Tab</kbd>: Inserta una sangría limpia de **4 espacios en blanco** dentro del área de escritura sin perder el foco del cursor.
+* **Telemetría en tiempo real:** La barra inferior contabiliza palabras, caracteres, saltos de línea y estima el tiempo de lectura considerando un promedio de **200 palabras por minuto**.
+
+---
+
+## 🔬 4. Prueba de Estrés de Formato Markdown
+
+### Formato en Línea y Jerarquía Tipográfica
+Se admite texto en **negrita fuerte**, en *cursiva con énfasis*, texto combinado en ***negrita y cursiva***, marcado tachado con ~~doble virgulilla~~ y referencias a código en línea como \`const buffer = Buffer.alloc(1024)\`.
+
+#### Citas Textuales Multinivel
+> Nivel 1: La simplicidad estructural es requisito previo para la confiabilidad del software.
+>> Nivel 2: Los sistemas modulares desacoplados evitan la propagación de fallos en cascada.
+>>> Nivel 3: Toda dependencia innecesaria representa un vector potencial de indisponibilidad.
+
+---
+
+### Listas Complejas, Anidadas y de Tareas (Checklists)
+
+* [x] Diseñar arquitectura modular para funcionamiento en red de área local (LAN).
+* [x] Descargar motores locales \`marked.min.js\`, \`purify.min.js\` y \`highlight.min.js\`.
+* [ ] Auditoría de seguridad del protocolo de sincronización:
+  * [x] Sanitización obligatoria con DOMPurify para prevenir inyecciones XSS.
+  * [ ] Verificación de integridad de transacciones concurrentes en SQLite.
+  * 1. Fase de respaldo por volcado JSON.
+  * 2. Fase de verificación de tablas maestras.
+    * Elemento subordinado de verificación alfa.
+    * Elemento subordinado de verificación beta.
+
+---
+
+### Matriz de Rendimiento y Comparativa de Tablas
+
+| Identificador | Módulo del Sistema | Motor Principal | Nivel de Complejidad | Estado de Conectividad | Rendimiento (LPS) |
+| :--- | :--- | :---: | :---: | :---: | ---: |
+| **MOD-01** | Clips Rápidos | Vanilla JS | Mínimo | 100% LAN / Offline | 12.500 ops/s |
+| **MOD-02** | Snippets de Código | Highlight.js | Medio | 100% LAN / Offline | 8.200 ops/s |
+| **MOD-03** | Bloc de Notas & Borradores | Marked + Purify | Medio | 100% LAN / Offline | 9.800 ops/s |
+| **MOD-04** | Concatenador / Fusionador | LocalStorage Sync | Mínimo | 100% LAN / Offline | 15.000 ops/s |
+| **MOD-05** | Documentos & Math Studio | KaTeX + Mermaid | Avanzado | 100% LAN / Offline | 3.400 ops/s |
+
+---
+
+### Validación de Sintaxis Multilingüe (Highlight.js)
+
+\`\`\`python
+# Validar rendimiento y persistencia en Python
+import time
+from typing import Dict, Any
+
+class TelemetriaEditor:
+    def __init__(self, palabras: int, caracteres: int):
+        self.palabras = palabras
+        self.caracteres = caracteres
+        self.timestamp = time.time()
+
+    def estimar_minutos(self, wpm: int = 200) -> int:
+        return max(1, (self.palabras + wpm - 1) // wpm)
+
+    def exportar_resumen(self) -> Dict[str, Any]:
+        return {
+            "palabras": self.palabras,
+            "caracteres": self.caracteres,
+            "minutos_lectura": self.estimar_minutos(),
+            "valido": self.palabras > 0
+        }
+\`\`\`
+
+\`\`\`javascript
+// Conmutador asíncrono y sanitización DOM en cliente
+async function sincronizarNota(payload) {
+    const encabezados = { "Content-Type": "application/json" };
+    try {
+        const respuesta = await fetch("/guardar", {
+            method: "POST",
+            headers: encabezados,
+            body: JSON.stringify(payload)
+        });
+        if (!respuesta.ok) throw new Error("Fallo en sincronización local");
+        console.log("Nota persistida exitosamente.");
+    } catch (error) {
+        console.error("Modo degradado activado:", error.message);
+    }
+}
+\`\`\`
+
+\`\`\`sql
+-- Consulta de verificación de integridad referencial
+SELECT id, titulo, categoria, LENGTH(contenido) AS longitud_caracteres
+FROM clips
+WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano')
+ORDER BY id DESC
+LIMIT 10;
+\`\`\`
+
+---
+*Fin de la batería de pruebas.*`;
+
+function cargarEjemploEstres() {
+    if (textarea.value.trim() && !confirm("¿Deseas reemplazar el texto actual con la batería de prueba e instrucciones?")) {
+        return;
     }
 
-    // Descarga en formato TXT
-    function descargarTxt() {
-        const inputTitulo = document.getElementById("editorTitulo");
-        const nombreBase = (inputTitulo ? inputTitulo.value.trim() : "") || "borrador";
-        const nombreArchivo = `${nombreBase.replace(/[/\\?%*:|"<>]/g, '_')}.txt`;
-        
-        
-        const blob = new Blob([textarea.value], { type: "text/plain;charset=utf-8" });
-        const enlace = document.createElement("a");
-        enlace.href = URL.createObjectURL(blob);
-        enlace.download = nombreArchivo;
-        document.body.appendChild(enlace);
-        enlace.click();
-        document.body.removeChild(enlace);
-        URL.revokeObjectURL(enlace.href);
+    document.getElementById("editorTitulo").value = "Batería de Prueba de Estrés & Manual de Notas";
+    textarea.value = TEXTO_EJEMPLO_ESTRES;
+    
+    // Asignar categoría 'Borrador' y sincronizar interfaz
+    if (selectTipo) {
+        selectTipo.value = "Borrador";
+        actualizarModoEditor();
     }
+    
+    actualizarMetricas();
+    textarea.focus();
+    textarea.scrollTop = 0;
+}
+
+
 </script>
 {% endblock %}

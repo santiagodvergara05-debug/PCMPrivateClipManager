@@ -1,21 +1,50 @@
+{# ============================================================================== #}
+{# PCM PRIVATE CLIP MANAGER - GESTOR DE SNIPPETS & REPOSITORIO DE CÓDIGO V7     #}
+{# ============================================================================== #}
+
 {% extends "base.html" %}
 
 {% block title %}PCMPrivateClipManager - Snippets de Código{% endblock %}
 
 {% block extra_css %}
 <!-- Resaltador de Sintaxis: Tema GitHub Dark -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/github-dark.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/codigo.css') }}">
+
+<style>
+    /* Botón de limpieza en el buscador reactivo */
+    .btn-clear-code-search {
+        position: absolute;
+        right: 110px;
+        background: transparent;
+        border: none;
+        color: #8b949e;
+        cursor: pointer;
+        font-size: 0.85rem;
+        padding: 0.2rem 0.5rem;
+    }
+    .btn-clear-code-search:hover {
+        color: #f85149;
+    }
+
+    /* Animación de eliminación de tarjeta */
+    .code-card-removing {
+        opacity: 0;
+        transform: scale(0.95);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+</style>
 {% endblock %}
 
 {% block content %}
 <div class="code-container">
 
-    <!-- Fila unificada: Buscador reactivo y Botón Nuevo Snippet -->
+    <!-- BARRA SUPERIOR: BUSCADOR REACTIVO Y ACCIÓN DE NUEVO SNIPPET -->
     <div class="search-action-row">
-        <div class="search-input-box">
+        <div class="search-input-box" style="position: relative;">
             <span class="search-icon">🔍</span>
             <input type="text" id="buscadorCodigo" placeholder="Buscar por título, lenguaje o contenido..." autocomplete="off">
+            <button type="button" id="btnLimpiarBusquedaCodigo" class="btn-clear-code-search" onclick="limpiarFiltroCodigo()" style="display: none;" title="Limpiar búsqueda">✕</button>
             <span id="contadorCodigo" class="search-counter">{{ snippets|length }} snippets</span>
         </div>
 
@@ -24,31 +53,34 @@
         </a>
     </div>
 
-    <!-- Píldoras de filtrado por lenguaje -->
-    <nav class="lang-filter-bar">
-        <button type="button" class="lang-pill active" onclick="filtrarLenguaje('todos', this)">Todos</button>
+    <!-- PÍLDORAS REACTIVAS DE FILTRADO POR LENGUAJE -->
+    <nav class="lang-filter-bar" id="barraFiltroLenguajes">
+        <button type="button" class="lang-pill active" data-lang="todos" onclick="filtrarLenguaje('todos', this)">Todos</button>
         {% for lang in lenguajes_disponibles %}
-        <button type="button" class="lang-pill" onclick="filtrarLenguaje('{{ lang|lower }}', this)">
+        <button type="button" class="lang-pill" data-lang="{{ lang|lower }}" onclick="filtrarLenguaje('{{ lang|lower }}', this)">
             {{ lang }}
         </button>
         {% endfor %}
     </nav>
 
-    <!-- Grilla de Snippets -->
+    <!-- GRILLA DINÁMICA DE SNIPPETS -->
     <div class="code-grid" id="contenedorCodigo">
         {% for s in snippets %}
         {% set lang_name = s.categoria.replace('Codigo:', '') %}
         <article class="code-card" 
                  id="card-code-{{ s.id }}"
-                 data-title="{{ s.titulo|lower }}" 
-                 data-code="{{ s.contenido|lower }}" 
+                 data-id="{{ s.id }}"
+                 data-title="{{ s.titulo|lower if s.titulo else '' }}" 
+                 data-code="{{ s.contenido|lower if s.contenido else '' }}" 
                  data-lang="{{ lang_name|lower }}">
             
-            <textarea id="raw-code-{{ s.id }}" style="display: none;">{{ s.contenido }}</textarea>
+            <!-- Respaldo del código crudo sin escape HTML para copia o edición -->
+            <textarea id="raw-code-{{ s.id }}" style="display: none;" readonly>{{ s.contenido }}</textarea>
 
             <div class="code-card-header">
                 <div class="code-card-topbar">
                     <div class="terminal-meta">
+                        <!-- Botones decorativos estilo consola de terminal -->
                         <div class="terminal-dots">
                             <span class="dot red"></span>
                             <span class="dot yellow"></span>
@@ -58,13 +90,13 @@
                     </div>
 
                     <div class="code-card-actions">
-                        <button type="button" class="btn-code-action expand" onclick="expandirSnippet('{{ s.id }}')" title="Ver en pantalla completa">
+                        <button type="button" class="btn-code-action expand" onclick="expandirSnippet('{{ s.id }}')" title="Ver en pantalla completa con números de línea">
                             🔍 Expandir
                         </button>
                         <button type="button" class="btn-code-action edit" onclick="abrirModalEditarCodigo('{{ s.id }}', '{{ lang_name }}')" title="Editar snippet">
                             ✏️ Editar
                         </button>
-                        <button type="button" class="btn-code-action copy" onclick="copiarSnippet('{{ s.id }}', this)" title="Copiar código">
+                        <button type="button" class="btn-code-action copy" onclick="copiarSnippet('{{ s.id }}', this)" title="Copiar código al portapapeles">
                             Copiar
                         </button>
                         <button type="button" class="btn-code-action delete" onclick="eliminarSnippet('{{ s.id }}')" title="Eliminar fragmento">
@@ -76,6 +108,7 @@
                 <h3 class="code-card-title" title="{{ s.titulo }}">{{ s.titulo }}</h3>
             </div>
 
+            <!-- Previsualización con coloreado de sintaxis -->
             <div class="code-block-preview">
                 <pre><code class="language-{{ lang_name|lower }}">{{ s.contenido }}</code></pre>
             </div>
@@ -86,16 +119,17 @@
         </article>
         {% else %}
         <div class="empty-state">
-            <p>No tienes snippets de código guardados aún.</p>
+            <p>💻 No tienes snippets de código guardados aún.</p>
         </div>
         {% endfor %}
     </div>
 
+    <!-- ESTADO VACÍO CUANDO NO HAY COINCIDENCIAS -->
     <div id="noResultadosCodigo" class="no-results" style="display: none;">
-        <p>No se encontraron fragmentos que coincidan con la búsqueda.</p>
+        <p>🔍 No se encontraron fragmentos que coincidan con la búsqueda.</p>
     </div>
 
-    <!-- Modal Expandir -->
+    <!-- MODAL 1: VISOR EXPANDIDO CON REGLA NUMÉRICA -->
     <div id="modalCodigo" class="code-modal-overlay" style="display: none;">
         <div class="code-modal-box">
             <div class="code-modal-header">
@@ -118,7 +152,7 @@
         </div>
     </div>
 
-    <!-- Modal Editar -->
+    <!-- MODAL 2: EDITOR RÁPIDO EN CALIENTE -->
     <div id="modalEditarCodigo" class="code-modal-overlay" style="display: none;">
         <div class="code-modal-box code-edit-box">
             <div class="code-modal-header">
@@ -165,209 +199,288 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<!-- Motor de sintaxis Highlight.js Local (100% Offline / LAN) -->
+<script src="{{ url_for('static', filename='js/highlight.min.js') }}"></script>
 <script>
-    document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", () => {
         if (window.hljs) hljs.highlightAll();
     });
 
-    const modalCodigo = document.getElementById("modalCodigo");
-    const modalEditarCodigo = document.getElementById("modalEditarCodigo");
-    const modalScroll = document.getElementById("modalCodeScroll");
-    const modalGutter = document.getElementById("modalLineNumbers");
-    const editArea = document.getElementById("editCodeContenido");
-    const editGutter = document.getElementById("editLineNumbers");
-    const buscador = document.getElementById("buscadorCodigo");
-    const contenedor = document.getElementById("contenedorCodigo");
-    const contador = document.getElementById("contadorCodigo");
-    const sinResultados = document.getElementById("noResultadosCodigo");
-    let lenguajeActivo = "todos";
+/**
+ * ==============================================================================
+ * PCM PRIVATE CLIP MANAGER - GESTOR DE SNIPPETS DE CÓDIGO (CODIGO.JS)
+ * ==============================================================================
+ * Responsabilidades:
+ * 1. Inicialización del motor de sintaxis (Highlight.js).
+ * 2. Filtrado dinámico por texto y etiquetas de lenguaje.
+ * 3. Generación y sincronización de reglas de números de línea (IDE Gutter).
+ * 4. Soporte para indentación con tecla Tab (4 espacios).
+ * 5. Visor expandido y modal de edición con aislamiento de scroll.
+ * 6. Operaciones transaccionales asíncronas de copiado y eliminación.
+ * ==============================================================================
+ */
 
-    function generarNumerosLinea(totalLineas) {
-        let html = '';
-        for (let i = 1; i <= totalLineas; i++) {
-            html += `<div>${i}</div>`;
-        }
-        return html;
+/* ==============================================================================
+   SECCIÓN 1: DECLARACIÓN DE VARIABLES Y ELEMENTOS DEL DOM
+   ============================================================================== */
+const buscador = document.getElementById("buscadorCodigo");
+const btnLimpiar = document.getElementById("btnLimpiarBusquedaCodigo");
+const contenedor = document.getElementById("contenedorCodigo");
+const contador = document.getElementById("contadorCodigo");
+const sinResultados = document.getElementById("noResultadosCodigo");
+
+// Modales y áreas de trabajo tipo IDE
+const modalCodigo = document.getElementById("modalCodigo");
+const modalEditarCodigo = document.getElementById("modalEditarCodigo");
+const modalScroll = document.getElementById("modalCodeScroll");
+const modalGutter = document.getElementById("modalLineNumbers");
+const editArea = document.getElementById("editCodeContenido");
+const editGutter = document.getElementById("editLineNumbers");
+
+let lenguajeActivo = "todos";
+
+/* ==============================================================================
+   SECCIÓN 2: INICIALIZACIÓN DEL MOTOR DE RESALTADO SINTÁCTICO
+   ============================================================================== */
+document.addEventListener("DOMContentLoaded", () => {
+    if (window.hljs) {
+        hljs.highlightAll();
     }
+});
 
-    if (modalScroll && modalGutter) {
-        modalScroll.addEventListener("scroll", () => {
-            modalGutter.scrollTop = modalScroll.scrollTop;
-        });
+/* ==============================================================================
+   SECCIÓN 3: REGLA DE NÚMEROS DE LÍNEA (IDE GUTTER)
+   ============================================================================== */
+/**
+ * Genera el marcado de números de línea basado en el conteo total.
+ */
+function generarNumerosLinea(totalLineas) {
+    let html = '';
+    for (let i = 1; i <= totalLineas; i++) {
+        html += `<div>${i}</div>`;
     }
+    return html;
+}
 
-    function expandirSnippet(id) {
-        const card = document.getElementById(`card-code-${id}`);
-        const raw = document.getElementById(`raw-code-${id}`);
-        if (!card || !raw) return;
+// Sincronización de scroll vertical entre el visor de código y su canaleta numérica
+if (modalScroll && modalGutter) {
+    modalScroll.addEventListener("scroll", () => {
+        modalGutter.scrollTop = modalScroll.scrollTop;
+    });
+}
 
-        const titleElem = card.querySelector(".code-card-title");
-        const titulo = titleElem ? titleElem.innerText : "Snippet";
-        const lang = card.getAttribute("data-lang") || "texto";
+/**
+ * Regenera las líneas numéricas en el editor editable.
+ */
+function actualizarLineasEditor() {
+    if (!editArea || !editGutter) return;
+    const lineas = editArea.value.split("\n").length || 1;
+    editGutter.innerHTML = generarNumerosLinea(lineas);
+}
 
-        document.getElementById("modalTitulo").innerText = titulo;
-        
-        const badge = document.getElementById("modalLangBadge");
-        if (badge) {
-            badge.innerText = lang.toUpperCase();
-            badge.className = `badge-lang badge-${lang}`;
-        }
+if (editArea && editGutter) {
+    editArea.addEventListener("input", actualizarLineasEditor);
+    editArea.addEventListener("scroll", () => {
+        editGutter.scrollTop = editArea.scrollTop;
+    });
 
-        const codeBlock = document.getElementById("modalCodeBlock");
-        if (codeBlock) {
-            codeBlock.className = `language-${lang}`;
-            codeBlock.textContent = raw.value;
-            if (window.hljs) hljs.highlightElement(codeBlock);
-        }
-
-        const totalLineas = raw.value.split("\n").length || 1;
-        modalGutter.innerHTML = generarNumerosLinea(totalLineas);
-        modalScroll.scrollTop = 0;
-        modalGutter.scrollTop = 0;
-
-        const btnCopiar = document.getElementById("btnCopiarModal");
-        if (btnCopiar) {
-            btnCopiar.onclick = function() { copiarSnippet(id, this); };
-        }
-
-        modalCodigo.style.display = "flex";
-    }
-
-    function cerrarModalCodigo() {
-        modalCodigo.style.display = "none";
-    }
-
-    function actualizarLineasEditor() {
-        if (!editArea || !editGutter) return;
-        const lineas = editArea.value.split("\n").length || 1;
-        editGutter.innerHTML = generarNumerosLinea(lineas);
-    }
-
-    if (editArea && editGutter) {
-        editArea.addEventListener("input", actualizarLineasEditor);
-        editArea.addEventListener("scroll", () => {
-            editGutter.scrollTop = editArea.scrollTop;
-        });
-
-        editArea.addEventListener("keydown", function(e) {
-            if (e.key === "Tab") {
-                e.preventDefault();
-                const start = this.selectionStart;
-                const end = this.selectionEnd;
-                this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
-                this.selectionStart = this.selectionEnd = start + 4;
-                actualizarLineasEditor();
-            }
-        });
-    }
-
-    function abrirModalEditarCodigo(id, lenguaje) {
-        const card = document.getElementById(`card-code-${id}`);
-        const raw = document.getElementById(`raw-code-${id}`);
-        const titleElem = card.querySelector(".code-card-title");
-
-        document.getElementById("formEditarCodigo").action = `/codigo/editar/${id}`;
-        document.getElementById("editCodeTitulo").value = titleElem ? titleElem.innerText : "";
-        document.getElementById("editCodeLenguaje").value = lenguaje;
-        document.getElementById("editCodeContenido").value = raw ? raw.value : "";
-
-        modalEditarCodigo.style.display = "flex";
-
-        setTimeout(() => {
+    // Soporte de tabulación de 4 espacios (evita perder el foco con la tecla Tab)
+    editArea.addEventListener("keydown", function(e) {
+        if (e.key === "Tab") {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+            this.selectionStart = this.selectionEnd = start + 4;
             actualizarLineasEditor();
-            if (editArea) editArea.scrollTop = 0;
-            if (editGutter) editGutter.scrollTop = 0;
-        }, 15);
+        }
+    });
+}
+
+/* ==============================================================================
+   SECCIÓN 4: MOTOR REACTIVO DE BÚSQUEDA Y FILTRADO POR LENGUAJE
+   ============================================================================== */
+function aplicarFiltros() {
+    const query = buscador.value.toLowerCase().trim();
+    const cards = contenedor.querySelectorAll(".code-card");
+    let visibles = 0;
+
+    if (btnLimpiar) {
+        btnLimpiar.style.display = query ? "block" : "none";
     }
 
-    function cerrarModalEditarCodigo() {
-        modalEditarCodigo.style.display = "none";
-    }
+    cards.forEach(card => {
+        const title = card.getAttribute("data-title") || "";
+        const code = card.getAttribute("data-code") || "";
+        const lang = card.getAttribute("data-lang") || "";
 
-    window.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-            cerrarModalCodigo();
-            cerrarModalEditarCodigo();
+        const coincideTexto = query === "" || title.includes(query) || code.includes(query) || lang.includes(query);
+        const coincideLang = (lenguajeActivo === "todos" || lang === lenguajeActivo);
+
+        if (coincideTexto && coincideLang) {
+            card.style.display = "";
+            visibles++;
+        } else {
+            card.style.display = "none";
         }
     });
 
-    if (modalCodigo) {
-        modalCodigo.addEventListener("click", (e) => {
-            if (e.target.id === "modalCodigo") cerrarModalCodigo();
-        });
+    contador.textContent = `${visibles} snippet${visibles === 1 ? '' : 's'}`;
+    sinResultados.style.display = visibles === 0 ? "block" : "none";
+}
+
+if (buscador) buscador.addEventListener("input", aplicarFiltros);
+
+function limpiarFiltroCodigo() {
+    buscador.value = "";
+    aplicarFiltros();
+    buscador.focus();
+}
+
+function filtrarLenguaje(lang, btn) {
+    lenguajeActivo = lang;
+    document.querySelectorAll(".lang-pill").forEach(p => p.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    aplicarFiltros();
+}
+
+/* ==============================================================================
+   SECCIÓN 5: VISOR EXPANDIDO (MODAL IDE)
+   ============================================================================== */
+function expandirSnippet(id) {
+    const card = document.getElementById(`card-code-${id}`);
+    const raw = document.getElementById(`raw-code-${id}`);
+    if (!card || !raw) return;
+
+    const titleElem = card.querySelector(".code-card-title");
+    const titulo = titleElem ? titleElem.innerText : "Snippet";
+    const lang = card.getAttribute("data-lang") || "texto";
+
+    document.getElementById("modalTitulo").innerText = titulo;
+    
+    const badge = document.getElementById("modalLangBadge");
+    if (badge) {
+        badge.innerText = lang.toUpperCase();
+        badge.className = `badge-lang badge-${lang}`;
     }
 
-    if (modalEditarCodigo) {
-        modalEditarCodigo.addEventListener("click", (e) => {
-            if (e.target.id === "modalEditarCodigo") cerrarModalEditarCodigo();
-        });
+    const codeBlock = document.getElementById("modalCodeBlock");
+    if (codeBlock) {
+        codeBlock.className = `language-${lang}`;
+        codeBlock.textContent = raw.value;
+        if (window.hljs) hljs.highlightElement(codeBlock);
     }
 
-    function copiarSnippet(id, btn) {
-        const raw = document.getElementById(`raw-code-${id}`);
-        if (raw && window.copiarTextoUniversal) {
-            window.copiarTextoUniversal(raw.value, btn);
+    const totalLineas = raw.value.split("\n").length || 1;
+    modalGutter.innerHTML = generarNumerosLinea(totalLineas);
+    modalScroll.scrollTop = 0;
+    modalGutter.scrollTop = 0;
+
+    const btnCopiar = document.getElementById("btnCopiarModal");
+    if (btnCopiar) {
+        btnCopiar.onclick = function() { copiarSnippet(id, this); };
+    }
+
+    modalCodigo.style.display = "flex";
+    document.body.style.overflow = "hidden"; // Bloquear scroll de fondo
+}
+
+function cerrarModalCodigo() {
+    modalCodigo.style.display = "none";
+    document.body.style.overflow = "";
+}
+
+/* ==============================================================================
+   SECCIÓN 6: MODAL DE EDICIÓN DE SNIPPETS
+   ============================================================================== */
+function abrirModalEditarCodigo(id, lenguaje) {
+    const card = document.getElementById(`card-code-${id}`);
+    const raw = document.getElementById(`raw-code-${id}`);
+    const titleElem = card.querySelector(".code-card-title");
+
+    document.getElementById("formEditarCodigo").action = `/codigo/editar/${id}`;
+    document.getElementById("editCodeTitulo").value = titleElem ? titleElem.innerText : "";
+    document.getElementById("editCodeLenguaje").value = lenguaje;
+    document.getElementById("editCodeContenido").value = raw ? raw.value : "";
+
+    modalEditarCodigo.style.display = "flex";
+    document.body.style.overflow = "hidden"; // Bloquear scroll de fondo
+
+    setTimeout(() => {
+        actualizarLineasEditor();
+        if (editArea) editArea.scrollTop = 0;
+        if (editGutter) editGutter.scrollTop = 0;
+    }, 20);
+}
+
+function cerrarModalEditarCodigo() {
+    modalEditarCodigo.style.display = "none";
+    document.body.style.overflow = "";
+}
+
+/* ==============================================================================
+   SECCIÓN 7: COPIADO, ELIMINACIÓN Y EVENTOS GLOBALES
+   ============================================================================== */
+function copiarSnippet(id, btn) {
+    const raw = document.getElementById(`raw-code-${id}`);
+    if (!raw) return;
+
+    if (window.copiarTextoUniversal) {
+        window.copiarTextoUniversal(raw.value, btn);
+    } else {
+        navigator.clipboard.writeText(raw.value).then(() => {
+            const original = btn.innerText;
+            btn.innerText = "✓";
+            setTimeout(() => {
+                btn.innerText = original;
+            }, 1200);
+        });
+    }
+}
+
+async function eliminarSnippet(id) {
+    if (!confirm("¿Eliminar este fragmento definitivamente?")) return;
+
+    const card = document.getElementById(`card-code-${id}`);
+    try {
+        const res = await fetch(`/eliminar/${id}`, {
+            method: "POST",
+            headers: { "X-Requested-With": "XMLHttpRequest" }
+        });
+
+        if (res.ok) {
+            if (card) card.classList.add("code-card-removing");
+            setTimeout(() => {
+                if (card) card.remove();
+                aplicarFiltros();
+            }, 200);
+        } else {
+            window.location.reload();
         }
+    } catch (err) {
+        window.location.href = `/eliminar/${id}`;
     }
+}
 
-    async function eliminarSnippet(id) {
-        if (!confirm("¿Eliminar este fragmento definitivamente?")) return;
-
-        const card = document.getElementById(`card-code-${id}`);
-        try {
-            const res = await fetch(`/eliminar/${id}`, {
-                method: "POST",
-                headers: { "X-Requested-With": "XMLHttpRequest" }
-            });
-
-            if (res.ok) {
-                card.style.transform = "scale(0.95)";
-                card.style.opacity = "0";
-                setTimeout(() => {
-                    card.remove();
-                    aplicarFiltros();
-                }, 200);
-            } else {
-                window.location.reload();
-            }
-        } catch (err) {
-            window.location.href = `/eliminar/${id}`;
-        }
+// Cierre unificado con tecla Escape
+window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+        cerrarModalCodigo();
+        cerrarModalEditarCodigo();
     }
+});
 
-    function aplicarFiltros() {
-        const query = buscador.value.toLowerCase().trim();
-        const cards = contenedor.querySelectorAll(".code-card");
-        let visibles = 0;
+// Cierre al pulsar el fondo exterior de cada modal
+if (modalCodigo) {
+    modalCodigo.addEventListener("click", (e) => {
+        if (e.target.id === "modalCodigo") cerrarModalCodigo();
+    });
+}
 
-        cards.forEach(card => {
-            const title = card.getAttribute("data-title") || "";
-            const code = card.getAttribute("data-code") || "";
-            const lang = card.getAttribute("data-lang") || "";
-
-            const coincideTexto = query === "" || title.includes(query) || code.includes(query) || lang.includes(query);
-            const coincideLang = (lenguajeActivo === "todos" || lang === lenguajeActivo);
-
-            if (coincideTexto && coincideLang) {
-                card.style.display = "";
-                visibles++;
-            } else {
-                card.style.display = "none";
-            }
-        });
-
-        contador.textContent = `${visibles} snippet${visibles === 1 ? '' : 's'}`;
-        sinResultados.style.display = visibles === 0 ? "block" : "none";
-    }
-
-    if (buscador) buscador.addEventListener("input", aplicarFiltros);
-
-    function filtrarLenguaje(lang, btn) {
-        lenguajeActivo = lang;
-        document.querySelectorAll(".lang-pill").forEach(p => p.classList.remove("active"));
-        btn.classList.add("active");
-        aplicarFiltros();
-    }
+if (modalEditarCodigo) {
+    modalEditarCodigo.addEventListener("click", (e) => {
+        if (e.target.id === "modalEditarCodigo") cerrarModalEditarCodigo();
+    });
+}
 </script>
 {% endblock %}

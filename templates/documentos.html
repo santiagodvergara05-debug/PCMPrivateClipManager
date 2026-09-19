@@ -140,7 +140,7 @@
                 <!-- Columna Izquierda: Prompt para IA -->
                 <div class="pruebas-seccion">
                     <div class="pruebas-seccion-header">
-                        <strong style="color: #f0f6fc;">🤖 Prompt para la IA</strong>
+                        <strong style="color: #f0f6fc;">🤖 Prompt recomendado para la IA</strong>
                         <button type="button" class="btn-modal-accion" onclick="copiarPromptModal()">📋 Copiar Prompt</button>
                     </div>
                     <textarea id="modalPromptTexto" class="modal-textarea-readonly" readonly></textarea>
@@ -151,8 +151,8 @@
                     <div class="pruebas-seccion-header">
                         <strong style="color: #f0f6fc;">📄 Contenido Markdown</strong>
                         <div class="btn-group-modal">
-                            <button type="button" class="btn-modal-accion" onclick="insertarEnEditor(false)">➕ En cursor</button>
-                            <button type="button" class="btn-modal-accion btn-reemplazar" onclick="insertarEnEditor(true)">🔄 Reemplazar</button>
+                            <button type="button" class="btn-modal-accion" onclick="insertarEnEditor(false)">➕ Insertar</button>
+                            <button type="button" class="btn-modal-accion btn-reemplazar" onclick="insertarEnEditor(true)">🔄 Reemplazar MD</button>
                         </div>
                     </div>
                     <textarea id="modalMarkdownTexto" class="modal-textarea-readonly" readonly></textarea>
@@ -912,7 +912,12 @@ Requisitos estrictos:
 1. Delimita fórmulas en bloque únicamente con $$ en líneas independientes o entornos estándar (\\begin{aligned}, \\begin{pmatrix}, \\begin{cases}).
 2. Delimita fórmulas en línea con un solo signo de dólar ($...$) sin espacios internos al inicio o final.
 3. Incluye: matrices con elipses (\\cdots, \\vdots, \\ddots), límites, integrales múltiples, polinomios de grado n, raíces con orden (\\sqrt[n]{}), series de Taylor y notación tensorial.
-4. No utilices paquetes de LaTeX no soportados por navegadores como TikZ o tabular.`,
+4. No utilices paquetes de LaTeX no soportados por navegadores como TikZ o tabular.
+5. Si te adjuntan una imagen o te piden resolver un ejercicio/problema puntual, desarrollá la resolución completa paso a paso y devolvé el resultado ÍNTEGRO dentro de un bloque de Markdown válido (siguiendo las reglas anteriores), listo para copiar y pegar directo en el editor — sin texto explicativo suelto por fuera del bloque.
+
+---
+📄 Petición específica del usuario:
+[Reemplazá esta línea con tu pedido: un tema para generar un documento nuevo, O un ejercicio/imagen que necesitás que resuelva paso a paso.]`,
         markdown: `# Batería Integral de Pruebas: Motor Matemático KaTeX
 
 Documento de validación y estrés tipográfico para evaluar la precisión del renderizado algebraico, vectorial y de cálculo infinitesimal en KaTeX dentro de PCM.
@@ -1109,7 +1114,12 @@ Restricciones de sintaxis:
 1. Para diagramas de capas jerárquicas (Frontend, Backend, DB), prioriza 'flowchart LR' o declara enlaces externos fuera de los subgrafos.
 2. No usar guiones medios (-) en IDs de nodo (usar guiones bajos o camelCase: nodo_1, no nodo-1).
 3. Todo texto de nodo con caracteres especiales o tildes debe ir entre comillas: A["¿Datos válidos?"].
-4. En diagramas de secuencia, usa autonumber y declara participantes explícitos arriba.`,
+4. En diagramas de secuencia, usa autonumber y declara participantes explícitos arriba.
+5. Si te adjuntan una imagen (foto de un pizarrón, boceto, diagrama de otro sistema) o te describen un proceso/arquitectura en texto, interpretalo y convertilo en un diagrama Mermaid equivalente — devolvé el resultado ÍNTEGRO dentro de un bloque \`\`\`mermaid válido según las reglas anteriores, listo para copiar y pegar directo en el editor, sin texto explicativo suelto por fuera del bloque.
+
+---
+📄 Petición específica del usuario:
+[Reemplazá esta línea con tu pedido: una arquitectura o proceso para diagramar desde cero, O una imagen/descripción que necesitás que convierta en Mermaid.]`,
         markdown: `# Batería Integral de Pruebas: Motor de Diagramación Mermaid.js
 
 Documento de validación técnica exhaustiva para evaluar todas las capacidades sintácticas y de renderizado vectorial soportadas por la biblioteca Mermaid.js dentro del entorno PCM.
@@ -1497,11 +1507,16 @@ quadrantChart
     gfm: {
         prompt: `Genera una especificación técnica completa en GitHub Flavored Markdown (GFM).
 Requisitos estrictos:
-1. Incluye una tabla exhaustiva con cabecera y alineaciones mixtas (:---, :---:, ---:), con texto formateado dentro de celdas.
-2. Incluye listas de tareas jerárquicas con checkboxes (- [x] y - [ ]).
-3. Incluye notas al pie de página funcionales usando la sintaxis [^1] y sus definiciones al pie del texto.
-4. Aplica tipografía extendida: tachado (~~texto~~), resaltado (==texto== o <mark>), subíndices (H~2~O), superíndices (2^16^) y atajos de teclado con <kbd>.
-5. Incluye un bloque desplegable usando <details> y <summary>.`,
+1. Incluye una tabla exhaustiva con cabecera y alineaciones mixtas (:---, :---:, --:), con texto formateado dentro de celdas. Si una celda necesita mostrar el carácter | literal, escapalo como \|.
+2. Incluye listas de tareas jerárquicas con checkboxes (- [x] y - [ ]), cada una en su propia línea con el espacio obligatorio tras el corchete.
+3. Incluye notas al pie de página funcionales usando [^clave] en el cuerpo del texto y su definición [^clave]: explicación en una línea propia al final del documento — nunca las mezcles dentro de un párrafo.
+4. Aplica tipografía extendida: tachado (~~texto~~), resaltado (==texto== o <mark>), subíndices (H~2~O), superíndices (2^16^) y atajos de teclado con <kbd>, sin espacios pegados a los símbolos.
+5. Incluye un bloque desplegable con <details> y <summary> cuando el contenido sea secundario o extenso (anexos, detalles opcionales).
+6. Si te adjuntan una imagen (captura de pantalla, tabla escaneada, gráfico de otro sistema) o un documento de referencia, extraé y organizá esa información en un informe estructurado siguiendo las reglas anteriores — devolvé el resultado ÍNTEGRO dentro de un bloque de Markdown válido, listo para copiar y pegar directo en el editor, sin texto explicativo suelto por fuera del bloque.
+
+---
+📄 Petición específica del usuario:
+[Reemplazá esta línea con tu pedido: el tema del informe, el público al que va dirigido, y la extensión aproximada. Si adjuntás una imagen o documento, indicá qué información necesitás que extraiga y organice.]`,
         markdown: `# Batería Integral de Pruebas: Especificación GFM y Tipografía
 
 Documento de validación técnica para evaluar el cumplimiento del estándar GitHub Flavored Markdown, notas al pie, tablas complejas y componentes tipográficos en PCM.

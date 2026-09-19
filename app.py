@@ -27,6 +27,9 @@ import shutil
 import webbrowser
 import threading
 from datetime import datetime
+# Componentes del framework web y variables de entorno
+from flask import Flask, jsonify, request, send_from_directory
+from dotenv import load_dotenv, dotenv_values, set_key
 
 # Componentes del framework web y variables de entorno
 from flask import Flask, jsonify, request
@@ -48,7 +51,7 @@ else:
     # Entorno estándar de desarrollo de Python
     DIRECTORIO_RAIZ = os.path.dirname(os.path.abspath(__file__))
     BUNDLE_DIR = DIRECTORIO_RAIZ
-
+os.chdir(DIRECTORIO_RAIZ)
 # Definición centralizada de rutas persistentes en el disco local
 ENV_PATH = os.path.join(DIRECTORIO_RAIZ, ".env")
 DB_PATH = os.path.join(DIRECTORIO_RAIZ, "pcm.db")
@@ -67,6 +70,14 @@ app = Flask(
 
 # Registro único del Blueprint de rutas
 app.register_blueprint(clips_bp)
+
+@app.route("/static/uploads/documentos/<path:filename>")
+def servir_imagenes_subidas(filename):
+    """
+    Sirve los archivos multimedia directamente desde la carpeta física del disco local
+    al lado del .exe, evitando que Flask los busque en la memoria temporal congelada.
+    """
+    return send_from_directory(UPLOADS_DIR, filename)
 
 # Límite global amplio para soportar backups completos con multimedia: 250 MiB
 app.config["MAX_CONTENT_LENGTH"] = 250 * 1024 * 1024  # 262,144,000 bytes

@@ -1,4 +1,4 @@
----
+
 
 # Guía de Entorno y Desarrollo Local
 
@@ -20,9 +20,6 @@ Herramientas necesarias para sintaxis, resaltado de plantillas y administración
 
 * **SQLite Viewer** (`qwtel.sqlite-viewer` o `Florian Klampfer`): Visualización gráfica de tablas y registros `.db` dentro del editor.
 
-
-
----
 
 ### 2. Estructura inicial del proyecto (Solo primera vez)
 

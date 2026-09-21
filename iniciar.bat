@@ -1,24 +1,26 @@
 @echo off
 setlocal enabledelayedexpansion
-chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
 :: ===================================================================
-:: PARÁMETROS DEL SERVICIO (Personalizable por repositorio)
+:: CONFIGURACIÓN DEL CARGADOR DE ENTORNO
 :: ===================================================================
 set "APP_NAME=PCMPrivateClipManager"
 set "APP_VER=v2.5.0"
 set "APP_PORT=5545"
 set "APP_FILE=app.py"
-set "AUTO_OPEN=1"
 
-:: 1. Activar renderizado ANSI en Windows 10 nativo
+:: Rutas fijas protegidas contra espacios
+set "VENV_DIR=%~dp0.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+
+:: 1. Activar renderizado ANSI nativo en Windows 10 / 11
 reg add HKCU\Console /v VirtualTerminalLevel /t REG_DWORD /d 1 /f >nul 2>&1
 
-:: 2. Capturar código ESC mediante PowerShell
+:: 2. Capturar código ESC
 for /f %%a in ('powershell -NoProfile -Command "[char]27"') do set "ESC=%%a"
 
-:: 3. Definición de estilos y etiquetas idénticas a tu Bootloader
+:: 3. Definición de estilos idénticos al Bootloader de app.py
 set "RESET=%ESC%[0m"
 set "BOLD=%ESC%[1m"
 set "TAG_OK=%ESC%[92m[  OK  ]%RESET%"
@@ -30,11 +32,11 @@ set "TAG_FAIL=%ESC%[91m[ FAIL ]%RESET%"
 title %APP_NAME% %APP_VER% [Puerto %APP_PORT%]
 
 echo ===================================================================
-echo   BOOTLOADER :: %APP_NAME% %APP_VER% (OFFLINE ^& SECURE)
+echo   STAGE 1 :: INICIALIZADOR DE ENTORNO Y DEPENDENCIAS
 echo ===================================================================
 
 :: ===================================================================
-:: PASO 1: Comprobar entorno Python en el sistema
+:: PASO 1: Validación de Python base en el sistema
 :: ===================================================================
 python --version >nul 2>&1
 if errorlevel 1 (
@@ -44,12 +46,13 @@ if errorlevel 1 (
 )
 
 :: ===================================================================
-:: PASO 2: Gestión inteligente de Entorno Virtual (.venv)
+:: PASO 2: Gestión e indexación del Entorno Virtual (.venv)
 :: ===================================================================
-if not exist ".venv\Scripts\activate.bat" (
+set "FIRST_RUN=0"
+if not exist "%VENV_PY%" (
     echo %TAG_INIT% Entorno virtual ausente. Creando estructura .venv...
-    if exist ".venv" rd /s /q ".venv" >nul 2>&1
-    python -m venv .venv
+    if exist "%VENV_DIR%" rd /s /q "%VENV_DIR%" >nul 2>&1
+    python -m venv "%VENV_DIR%"
     if errorlevel 1 (
         echo %TAG_FAIL% Error critico al generar el entorno virtual.
         pause
@@ -59,90 +62,97 @@ if not exist ".venv\Scripts\activate.bat" (
     set "FIRST_RUN=1"
 ) else (
     echo %TAG_OK% Entorno virtual detectado e indexado.
-    set "FIRST_RUN=0"
-)
-
-call .venv\Scripts\activate.bat
-if errorlevel 1 (
-    echo %TAG_FAIL% Fallo al inicializar el contexto del entorno virtual.
-    pause
-    exit /b 1
 )
 
 :: ===================================================================
-:: PASO 3: Sincronización automática de Git (si existe repositorio)
+:: PASO 3: Sincronización Git automática
 :: ===================================================================
 if exist ".git" (
-    git --version >nul 2>&1
+    where git >nul 2>&1
     if not errorlevel 1 (
-        git fetch >nul 2>&1
+        git fetch --quiet >nul 2>&1
+        set "LOCAL_REV="
+        set "REMOTE_REV="
         for /f %%i in ('git rev-parse HEAD 2^>nul') do set "LOCAL_REV=%%i"
         for /f %%i in ('git rev-parse @{u} 2^>nul') do set "REMOTE_REV=%%i"
-        if not "!LOCAL_REV!"=="!REMOTE_REV!" (
-            if not "!REMOTE_REV!"=="" (
-                echo %TAG_INFO% Actualizaciones remotas detectadas. Descargando cambios...
-                git pull --ff-only --quiet >nul 2>&1
-                if !errorlevel! equ 0 (
-                    echo %TAG_OK% Codigo actualizado al ultimo commit.
-                ) else (
-                    echo %TAG_WARN% Conflicto en git pull. Se conserva version local.
-                )
-            )
-        ) else (
+
+        if not defined REMOTE_REV (
+            echo %TAG_OK% Repositorio local activo - sin seguimiento remoto configurado
+        ) else if "!LOCAL_REV!"=="!REMOTE_REV!" (
             echo %TAG_OK% Repositorio local sincronizado con GitHub.
+        ) else (
+            echo %TAG_INFO% Actualizaciones remotas detectadas. Descargando cambios...
+            git pull --ff-only --quiet >nul 2>&1
+            if !errorlevel! equ 0 (
+                echo %TAG_OK% Codigo actualizado al ultimo commit.
+            ) else (
+                echo %TAG_WARN% Conflicto en git pull. Se conserva version local.
+            )
         )
     )
 )
 
 :: ===================================================================
-:: PASO 4: Comprobación por Hash MD5 de dependencias (Fast-Boot)
+:: PASO 4: Comprobacion e Instalacion Detallada de Dependencias
 :: ===================================================================
 if exist "requirements.txt" (
     set "DO_INSTALL=0"
-    if !FIRST_RUN!==1 (
-        set "DO_INSTALL=1"
-    ) else (
-        if exist ".venv\.req_hash" (
-            for /f "delims=" %%h in ('certutil -hashfile requirements.txt MD5 2^>nul ^| find /v "hash"') do set "CUR_HASH=%%h"
-            set /p "OLD_HASH="<".venv\.req_hash"
-            if not "!CUR_HASH!"=="!OLD_HASH!" set "DO_INSTALL=1"
-        ) else (
-            set "DO_INSTALL=1"
-        )
+    if "!FIRST_RUN!"=="1" set "DO_INSTALL=1"
+
+    if "!DO_INSTALL!"=="0" (
+        "%VENV_PY%" -c "import hashlib, pathlib, sys; f=pathlib.Path(r'%VENV_DIR%\.req_hash'); sys.exit(0 if f.exists() and f.read_text().strip()==hashlib.md5(open('requirements.txt','rb').read()).hexdigest() else 1)" >nul 2>&1
+        if errorlevel 1 set "DO_INSTALL=1"
     )
+
+    :: Comprobacion preventiva: si falta Flask fisicamente, forzar instalacion
+    "%VENV_PY%" -c "import flask" >nul 2>&1
+    if errorlevel 1 set "DO_INSTALL=1"
 
     if "!DO_INSTALL!"=="1" (
-        echo %TAG_INIT% Novedades en requirements.txt. Actualizando librerias...
-        python -m pip install -r requirements.txt --quiet >nul 2>&1
-        if !errorlevel! equ 0 (
-            for /f "delims=" %%h in ('certutil -hashfile requirements.txt MD5 2^>nul ^| find /v "hash"') do echo %%h>".venv\.req_hash"
-            echo %TAG_OK% Dependencias verificadas y listas para produccion.
+        echo %TAG_INFO% Sincronizando librerias de requirements.txt...
+        
+        :: Normalizar requirements.txt eliminando \r por completo con splitlines
+        "%VENV_PY%" -c "import pathlib; p=pathlib.Path('requirements.txt'); lines=[l.strip() for l in p.read_text(encoding='utf-8', errors='ignore').splitlines() if l.strip() and not l.startswith('#')]; p.write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')" >nul 2>&1
+
+        set "INSTALL_OK=1"
+
+        :: Bucle limpio libre de caracteres de control
+        for /f "usebackq eol=# tokens=1 delims= " %%L in ("requirements.txt") do (
+            set "PAQUETE=%%L"
+            echo %TAG_INIT% Instalando: !BOLD!!PAQUETE!!RESET!...
+            
+            "%VENV_PY%" -m pip install "!PAQUETE!" --quiet >nul 2>&1
+            if !errorlevel! equ 0 (
+                echo %TAG_OK% Instalado: !BOLD!!PAQUETE!!RESET!
+            ) else (
+                echo %TAG_FAIL% Error al instalar: !BOLD!!PAQUETE!!RESET!
+                set "INSTALL_OK=0"
+            )
+        )
+
+        :: Guardar huella solo si todos los paquetes finalizaron con exito
+        if "!INSTALL_OK!"=="1" (
+            "%VENV_PY%" -c "import hashlib, pathlib; pathlib.Path(r'%VENV_DIR%\.req_hash').write_text(hashlib.md5(open('requirements.txt','rb').read()).hexdigest())" >nul 2>&1
+            echo %TAG_OK% Todas las dependencias quedaron preparadas.
         ) else (
-            echo %TAG_WARN% Fallo parcial en pip. Verifique dependencias manuales.
+            echo %TAG_WARN% Uno o mas paquetes fallaron. Se reintentara en el proximo inicio.
         )
     ) else (
-        echo %TAG_OK% Dependencias verificadas (sin cambios en requirements.txt).
+        echo %TAG_OK% Dependencias verificadas - sin cambios en requirements.txt
     )
 )
 
 :: ===================================================================
-:: PASO 5: Apertura automática y Despliegue de Flask
+:: PASO 5: Transferencia de Control al Bootloader de la Aplicacion
 :: ===================================================================
-if "%AUTO_OPEN%"=="1" (
-    start "" cmd /c "timeout /t 2 /nobreak >nul && start http://127.0.0.1:%APP_PORT%"
-)
-
 echo -------------------------------------------------------------------
-echo %TAG_INFO% Servidor Local enrutado en http://127.0.0.1:%APP_PORT%
-echo %TAG_INFO% Acceso LAN Red: Desactivado (modo exclusivo PC local)
-echo %BOLD%>>> %APP_NAME% OPERATIVO Y LISTO <<<%RESET%
+echo %TAG_OK% Entorno validado. Lanzando nucleo del servidor...
 echo -------------------------------------------------------------------
-echo.
 
-python %APP_FILE%
+"%VENV_PY%" "%APP_FILE%"
 if errorlevel 1 (
     echo.
-    echo %TAG_FAIL% La aplicacion se cerro de forma inesperada.
+    echo %TAG_FAIL% La aplicacion finalizo con un codigo de error.
 )
 
 pause

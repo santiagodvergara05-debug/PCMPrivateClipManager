@@ -101,6 +101,7 @@
                     <option value="Resumen" {% if clip and clip.categoria == 'Resumen' %}selected{% endif %}>📑 Resumen</option>
                     <option value="Apuntes" {% if clip and clip.categoria == 'Apuntes' %}selected{% endif %}>🎓 Apuntes</option>
                     <option value="Texto Plano" {% if clip and clip.categoria in ['Texto Plano', 'Bloc de Notas'] %}selected{% endif %}>📄 Bloc de Notas (Texto Plano)</option>
+                    <option value="Prompt" {% if clip and clip.categoria == 'Prompt' %}selected{% endif %}>💡 Prompt</option>
                 </select>
 
                 <input type="text" id="editorTitulo" name="titulo" class="editor-title-input" 
@@ -191,7 +192,6 @@ function actualizarModoEditor() {
 }
 
 function alternarVistaMarkdown() {
-    // Si está en modo texto plano, no procesar Markdown
     if (selectTipo.value === "Texto Plano") return;
 
     enModoPreview = !enModoPreview;
@@ -282,7 +282,7 @@ function descargarTexto() {
     const inputTitulo = document.getElementById("editorTitulo");
     const nombreBase = (inputTitulo ? inputTitulo.value.trim() : "") || "nota";
     const extension = (selectTipo.value === "Texto Plano") ? "txt" : "md";
-    const nombreArchivo = `${nombreBase.replace(/[/\\?%*:|"<>]/g, '_')}.${extension}`;
+    const nombreArchivo = `${nombreBase.replace(/[/\\?\%*:\vert{}"<>]/g, '_')}.${extension}`;
 
     const blob = new Blob([textarea.value], { type: "text/plain;charset=utf-8" });
     const enlace = document.createElement("a");
@@ -308,7 +308,6 @@ document.addEventListener("DOMContentLoaded", () => {
     actualizarMetricas();
 });
 
-
 /* ==============================================================================
    PLANTILLA DE PRUEBA DE ESTRÉS, INSTRUCCIONES Y LIMITACIONES TÉCNICAS
    ============================================================================== */
@@ -320,13 +319,14 @@ Documento de validación sintáctica, directivas de uso y verificación de lími
 
 ## 📌 1. Propósito y Clasificación de Categorías
 
-Este módulo está optimizado para la redacción continua de textos medianos y largos. Dispone de **5 categorías especializadas**:
+Este módulo está optimizado para la redacción continua de textos medianos y largos. Dispone de **6 categorías especializadas**:
 
 1. **📝 Nota:** Anotaciones rápidas, recordatorios, listas de tareas o fragmentos de texto temporal.
 2. **🚧 Borrador:** Artículos extensos, capítulos de lectura, novelas o documentación en desarrollo continuo.
 3. **📑 Resumen:** Síntesis ejecutivas de artículos, papers o resúmenes de libros.
 4. **🎓 Apuntes:** Fichas de estudio, conceptos teóricos y clases estructuradas.
 5. **📄 Bloc de Notas (Texto Plano):** Entorno idéntico al Notepad clásico de Windows.
+6. **💡 Prompt:** Instrucciones para modelos de lenguaje (LLM), comandos estructurados y plantillas de contexto.
 
 ---
 
@@ -436,7 +436,7 @@ async function sincronizarNota(payload) {
 -- Consulta de verificación de integridad referencial
 SELECT id, titulo, categoria, LENGTH(contenido) AS longitud_caracteres
 FROM clips
-WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano')
+WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Prompt')
 ORDER BY id DESC
 LIMIT 10;
 \`\`\`
@@ -452,7 +452,6 @@ function cargarEjemploEstres() {
     document.getElementById("editorTitulo").value = "Batería de Prueba de Estrés & Manual de Notas";
     textarea.value = TEXTO_EJEMPLO_ESTRES;
     
-    // Asignar categoría 'Borrador' y sincronizar interfaz
     if (selectTipo) {
         selectTipo.value = "Borrador";
         actualizarModoEditor();
@@ -462,7 +461,5 @@ function cargarEjemploEstres() {
     textarea.focus();
     textarea.scrollTop = 0;
 }
-
-
 </script>
 {% endblock %}

@@ -13,6 +13,39 @@ def migrar_base_antigua():
         except Exception as e:
             print(f"  [\033[93m WARN \033[0m] No se pudo renombrar cliptemp.db: {e}")
 
+def migrar_columna_tipo(conn):
+    """
+    Verifica si existe la columna 'tipo' en la tabla clips.
+    Si no existe, la añade de forma no destructiva y clasifica los registros existentes.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(clips)")
+    columnas = [col["name"] for col in cursor.fetchall()]
+
+    if "tipo" not in columnas:
+        try:
+            # 1. Agregar columna tipo sin alterar registros
+            cursor.execute("ALTER TABLE clips ADD COLUMN tipo TEXT DEFAULT 'clip'")
+            
+            # 2. Clasificar los textos que pertenecen al Bloc de Notas
+            cursor.execute("""
+                UPDATE clips 
+                SET tipo = 'nota' 
+                WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Novelas', 'Prompt')
+            """)
+            
+            # 3. Clasificar los fragmentos de código
+            cursor.execute("""
+                UPDATE clips 
+                SET tipo = 'codigo' 
+                WHERE categoria LIKE 'Codigo:%'
+            """)
+
+            conn.commit()
+            print("  [\033[92m  OK  \033[0m] Migración estructural: columna 'tipo' incorporada y registros clasificados.")
+        except Exception as e:
+            print(f"  [\033[91m ERROR \033[0m] Fallo al migrar columna 'tipo': {e}")
+
 def obtener_conexion():
     migrar_base_antigua()
     conn = sqlite3.connect(DB_NAME)
@@ -24,7 +57,7 @@ def inicializar_db():
     conn = obtener_conexion()
     cursor = conn.cursor()
     
-    # 1. Tabla de clips rápidos / notas temporales
+    # 1. Tabla de clips, notas y código
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS clips (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +65,7 @@ def inicializar_db():
             titulo TEXT,
             contenido TEXT NOT NULL,
             categoria TEXT DEFAULT 'General',
+            tipo TEXT DEFAULT 'clip',
             fecha_creacion INTEGER NOT NULL,
             expira_en INTEGER,
             vistas_restantes INTEGER DEFAULT -1,
@@ -39,7 +73,7 @@ def inicializar_db():
         )
     """)
 
-    # 2. Nueva tabla dedicada para Documentos & Math Studio
+    # 2. Tabla dedicada para Documentos & Math Studio
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS documentos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +85,10 @@ def inicializar_db():
     """)
 
     conn.commit()
+
+    # Ejecutar migración de columna 'tipo' para bases de datos existentes
+    migrar_columna_tipo(conn)
+
     conn.close()
 
 def purgar_expirados():

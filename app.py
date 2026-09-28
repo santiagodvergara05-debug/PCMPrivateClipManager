@@ -30,6 +30,7 @@ from datetime import datetime
 # Componentes del framework web y variables de entorno
 from flask import Flask, jsonify, request, send_from_directory
 from dotenv import load_dotenv, dotenv_values, set_key
+from logger_http import configurar_logger_http
 
 # Módulos internos de la arquitectura PCM
 import database
@@ -67,6 +68,9 @@ app = Flask(
 
 # Registro único del Blueprint de rutas
 app.register_blueprint(clips_bp)
+
+# Activar el traductor visual de peticiones HTTP
+configurar_logger_http(app)
 
 @app.route("/static/uploads/documentos/<path:filename>")
 def servir_imagenes_subidas(filename):
@@ -280,21 +284,14 @@ def auditar_integridad_db(db_path):
         if len(tablas) < 2:
             return "incompleta", 0, 0, 0, 0
 
-        # Cómputo de métricas con soporte para las 5 categorías de notas
-        cur.execute("""
-            SELECT COUNT(*) FROM clips 
-            WHERE categoria NOT IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Novelas') 
-              AND categoria NOT LIKE 'Codigo:%';
-        """)
+        # Cómputo de métricas directas por tipo estructural
+        cur.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'clip';")
         total_clips = cur.fetchone()[0]
 
-        cur.execute("SELECT COUNT(*) FROM clips WHERE categoria LIKE 'Codigo:%';")
+        cur.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'codigo';")
         total_codigo = cur.fetchone()[0]
 
-        cur.execute("""
-            SELECT COUNT(*) FROM clips 
-            WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Novelas');
-        """)
+        cur.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'nota';")
         total_resumenes = cur.fetchone()[0]
 
         cur.execute("SELECT COUNT(*) FROM documentos;")
@@ -481,10 +478,6 @@ if __name__ == "__main__":
     # Configuración de red y modo de logging de Werkzeug
     load_dotenv(ENV_PATH, override=True)
     app.secret_key = os.environ.get("SECRET_KEY")
-
-    log_mode_activo = os.environ.get("LOG_MODE", "false").strip().lower() == "true"
-    if not log_mode_activo:
-        logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     debug_mode = False if ES_EXE else (os.environ.get("FLASK_DEBUG", "false").strip().lower() == "true")
     host = os.environ.get("HOST", "127.0.0.1").strip()

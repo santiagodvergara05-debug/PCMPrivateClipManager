@@ -266,7 +266,6 @@
     margin-top: 1.5rem;
 }
 
-
 /* Píldoras de filtrado */
 .novel-filter-bar {
     display: flex;
@@ -297,19 +296,6 @@
     border-color: #388bfd;
     color: #ffffff;
     font-weight: 600;
-}
-
-/* Insignias por tipo */
-.badge-draft.badge-borrador {
-    background-color: #21262d;
-    color: #8b949e;
-    border-color: #30363d;
-}
-
-.badge-draft.badge-resumen {
-    background-color: rgba(56, 139, 253, 0.15);
-    color: #58a6ff;
-    border-color: rgba(56, 139, 253, 0.4);
 }
 
 /* =========================================
@@ -361,12 +347,10 @@
     }
 }
 
-/* Badges distintivos para cada una de las 5 categorías */
-.badge-nota { background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+/* Badges distintivos para cada una de las categorías */
+.badge-nota     { background-color: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
 .badge-borrador { background-color: rgba(251, 146, 60, 0.15); color: #fb923c; border: 1px solid rgba(251, 146, 60, 0.3); }
-.badge-resumen { background-color: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
-.badge-apuntes { background-color: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
-.badge-texto { background-color: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
-
-
-
+.badge-resumen  { background-color: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+.badge-apuntes  { background-color: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+.badge-texto    { background-color: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
+.badge-prompt   { background-color: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3); }

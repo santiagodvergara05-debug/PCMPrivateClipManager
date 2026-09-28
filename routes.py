@@ -57,7 +57,7 @@ RUTA_ENV = ".env"
 RUTA_ULTIMO_BACKUP = "ultimo_backup.txt"
 
 # Clasificación de categorías que usan la vista extendida de novela/borrador
-CATEGORIAS_TEXTO_LARGO = ("Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano", "Novelas")
+CATEGORIAS_TEXTO_LARGO = ("Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano", "Novelas", "Prompt")
 
 # Directorio de almacenamiento para imágenes asociadas a documentos Markdown
 CARPETA_IMAGENES_DOCS = os.path.join("static", "uploads", "documentos")
@@ -266,6 +266,8 @@ def login():
         temp_password=temp_password,
         master_key=master_key_val
     )
+
+
 @clips_bp.route("/logout")
 def logout():
     """Limpia las variables de sesión y redirige a la pantalla de login."""
@@ -285,20 +287,18 @@ def index():
     database.purgar_expirados()
     conn = database.obtener_conexion()
 
-    # Obtener clips excluyendo categorías que tienen módulos propios
+    # Obtener clips únicamente de tipo 'clip'
     clips = conn.execute("""
         SELECT * FROM clips 
-        WHERE categoria NOT IN ('Novelas', 'Borrador', 'Resumen') 
-          AND categoria NOT LIKE 'Codigo:%' 
+        WHERE tipo = 'clip'
         ORDER BY es_favorito DESC, id DESC
     """).fetchall()
 
-    # Listado dinámico de etiquetas/categorías creadas
+    # Listado dinámico de etiquetas/categorías SOLO de clips
     categorias_raw = conn.execute("""
         SELECT DISTINCT categoria 
         FROM clips 
-        WHERE categoria NOT IN ('Novelas', 'Borrador', 'Resumen') 
-          AND categoria NOT LIKE 'Codigo:%' 
+        WHERE tipo = 'clip'
           AND TRIM(categoria) != '' 
         ORDER BY categoria COLLATE NOCASE ASC
     """).fetchall()
@@ -325,8 +325,8 @@ def crear():
 
         conn = database.obtener_conexion()
         conn.execute("""
-            INSERT INTO clips (uuid, titulo, contenido, categoria, fecha_creacion, expira_en, vistas_restantes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clips (uuid, titulo, contenido, categoria, tipo, fecha_creacion, expira_en, vistas_restantes)
+            VALUES (?, ?, ?, ?, 'clip', ?, ?, ?)
         """, (clip_uuid, titulo, contenido, categoria, ahora, expira_en, vistas))
         conn.commit()
         conn.close()
@@ -419,18 +419,18 @@ def eliminar(clip_id):
     return redirect(url_for("clips.index"))
 
 
-# ==============================================
-# SECCIÓN 4: MÓDULO DE BORRADORES Y RESÚMENES
-# ==============================================
+# ==============================================================================
+# SECCIÓN 4: MÓDULO DE BORRADORES Y RESÚMENES (NOTAS)
+# ==============================================================================
 
 @clips_bp.route("/notas")
 @login_requerido
 def biblioteca_novelas():
-    """Muestra el catálogo de textos extensos (5 categorías)."""
+    """Muestra el catálogo de textos extensos."""
     conn = database.obtener_conexion()
     resumenes = conn.execute("""
         SELECT * FROM clips 
-        WHERE categoria IN ('Nota', 'Borrador', 'Resumen', 'Apuntes', 'Texto Plano', 'Novelas') 
+        WHERE tipo = 'nota' 
         ORDER BY id DESC
     """).fetchall()
     conn.close()
@@ -441,7 +441,7 @@ def biblioteca_novelas():
 @clips_bp.route("/editor/<int:clip_id>")
 @login_requerido
 def editor(clip_id=None):
-    """Carga la interfaz del editor simple de notas/borradores."""
+    """Carga la interfaz del editor simple de notas/borradores/prompts."""
     clip = None
     if clip_id:
         conn = database.obtener_conexion()
@@ -457,8 +457,8 @@ def guardar_resumen():
     clip_id = request.form.get("clip_id")
     titulo = request.form.get("titulo", "").strip() or "Texto sin título"
     tipo_doc = request.form.get("tipo_doc", "Borrador").strip()
-    # Permitir las 5 categorías válidas
-    categorias_permitidas = ["Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano"]
+    
+    categorias_permitidas = ["Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano", "Prompt"]
     if tipo_doc not in categorias_permitidas:
         tipo_doc = "Borrador"
 
@@ -472,15 +472,15 @@ def guardar_resumen():
     if clip_id:
         conn.execute("""
             UPDATE clips 
-            SET titulo = ?, contenido = ?, categoria = ? 
+            SET titulo = ?, contenido = ?, categoria = ?, tipo = 'nota'
             WHERE id = ?
         """, (titulo, contenido, tipo_doc, clip_id))
         registrar_log(f"Nota actualizada [{tipo_doc}]: '{titulo}'")
     else:
         clip_uuid = str(uuid.uuid4())[:8]
         conn.execute("""
-            INSERT INTO clips (uuid, titulo, contenido, categoria, fecha_creacion, expira_en, vistas_restantes)
-            VALUES (?, ?, ?, ?, ?, NULL, -1)
+            INSERT INTO clips (uuid, titulo, contenido, categoria, tipo, fecha_creacion, expira_en, vistas_restantes)
+            VALUES (?, ?, ?, ?, 'nota', ?, NULL, -1)
         """, (clip_uuid, titulo, contenido, tipo_doc, ahora))
         registrar_log(f"Nueva nota guardada [{tipo_doc}]: '{titulo}'")
 
@@ -535,8 +535,8 @@ def guardar_codigo():
 
         conn = database.obtener_conexion()
         conn.execute("""
-            INSERT INTO clips (uuid, titulo, contenido, categoria, fecha_creacion, expira_en, vistas_restantes)
-            VALUES (?, ?, ?, ?, ?, NULL, -1)
+            INSERT INTO clips (uuid, titulo, contenido, categoria, tipo, fecha_creacion, expira_en, vistas_restantes)
+            VALUES (?, ?, ?, ?, 'codigo', ?, NULL, -1)
         """, (clip_uuid, titulo, contenido, categoria_codigo, ahora))
         conn.commit()
         conn.close()
@@ -698,7 +698,6 @@ def api_subir_imagen_documento():
     4. Inspección binaria de Magic Bytes para verificar que sea una imagen real.
     5. Asignación de UUID seguro para prevenir Path Traversal y sobreescrituras.
     """
-    # 1. Comprobar que la petición contenga el campo 'imagen'
     if "imagen" not in request.files:
         return jsonify({"ok": False, "error": "No se envió ningún archivo en la petición."}), 400
 
@@ -706,10 +705,10 @@ def api_subir_imagen_documento():
     if not archivo or archivo.filename == "":
         return jsonify({"ok": False, "error": "El nombre del archivo está vacío."}), 400
 
-    # 2. Comprobación estricta de tamaño en stream (Límite 25 MiB)
+    # Comprobación estricta de tamaño en stream (Límite 25 MiB)
     archivo.seek(0, os.SEEK_END)
     tamano_bytes = archivo.tell()
-    archivo.seek(0)  # Rebobinar al inicio obligatorio
+    archivo.seek(0)
 
     if tamano_bytes > MAX_BYTES_IMAGEN:
         return jsonify({
@@ -717,14 +716,14 @@ def api_subir_imagen_documento():
             "error": f"El archivo supera el límite permitido de {LIMITE_MB_IMAGEN} MB ({formatear_tamano(tamano_bytes)})."
         }), 413
 
-    # 3. Validación de extensión de archivo
+    # Validación de extensión de archivo
     if not extension_valida(archivo.filename):
         return jsonify({
             "ok": False, 
             "error": "Extensión no permitida. Formatos aceptados: PNG, JPG, JPEG, GIF, WEBP."
         }), 400
 
-    # 4. Inspección binaria de cabeceras (Magic Bytes)
+    # Inspección binaria de cabeceras (Magic Bytes)
     formato_real = validar_firma_binaria_imagen(archivo.stream)
     if not formato_real:
         ip = request.remote_addr
@@ -734,7 +733,7 @@ def api_subir_imagen_documento():
             "error": "El archivo está dañado o no corresponde a una imagen válida (firma binaria rechazada)."
         }), 400
 
-    # 5. Guardado seguro en disco con identificador UUID
+    # Guardado seguro en disco con identificador UUID
     os.makedirs(CARPETA_IMAGENES_DOCS, exist_ok=True)
     nombre_limpio = secure_filename(archivo.filename)
     nombre_seguro = f"img_{uuid.uuid4().hex[:12]}.{formato_real}"
@@ -782,7 +781,6 @@ def api_listar_imagenes_documentos():
 @login_requerido
 def api_eliminar_imagen_documento(nombre):
     """Elimina una imagen puntual del disco garantizando que no haya escape de directorio."""
-    # Evita ataques de Path Traversal (ej. ../../archivo)
     if os.path.basename(nombre) != nombre or not extension_valida(nombre):
         ip = request.remote_addr
         print(f"\n\033[91m[ALERTA DE INTRUSIÓN :: PATH TRAVERSAL]\033[0m Parámetro malicioso interceptado en borrado: '{nombre}' | IP: {ip}")
@@ -827,7 +825,6 @@ def configuracion():
             set_key(RUTA_ENV, "HOST", nuevo_host)
             os.environ["HOST"] = nuevo_host
 
-    # --- Parámetros de red y entorno ---
         nuevo_port = request.form.get("port", "").strip()
         if nuevo_port:
             set_key(RUTA_ENV, "PORT", nuevo_port)
@@ -841,26 +838,16 @@ def configuracion():
         set_key(RUTA_ENV, "AUTO_ABRIR_NAVEGADOR", auto_abrir)
         os.environ["AUTO_ABRIR_NAVEGADOR"] = auto_abrir
 
-        # ---> REGISTRO GENERAL DE AJUSTES:
         registrar_log("Ajustes del servidor y variables .env actualizadas")
-
         return redirect(url_for("clips.configuracion", guardado=1))
 
     registrar_log("Panel de configuración y ajustes del sistema abierto")
 
     # Métricas de base de datos SQLite
     conn = database.obtener_conexion()
-    total_clips = conn.execute(
-        "SELECT COUNT(*) FROM clips WHERE categoria NOT IN ('Novelas', 'Borrador', 'Resumen') AND categoria NOT LIKE 'Codigo:%'"
-    ).fetchone()[0]
-
-    # Métricas de base de datos SQLite
-    conn = database.obtener_conexion()
-    total_clips = conn.execute(
-        "SELECT COUNT(*) FROM clips WHERE categoria NOT IN ('Novelas', 'Borrador', 'Resumen') AND categoria NOT LIKE 'Codigo:%'"
-    ).fetchone()[0]
-    total_codigo = conn.execute("SELECT COUNT(*) FROM clips WHERE categoria LIKE 'Codigo:%'").fetchone()[0]
-    total_resumenes = conn.execute("SELECT COUNT(*) FROM clips WHERE categoria IN ('Novelas', 'Borrador', 'Resumen')").fetchone()[0]
+    total_clips = conn.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'clip'").fetchone()[0]
+    total_codigo = conn.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'codigo'").fetchone()[0]
+    total_resumenes = conn.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'nota'").fetchone()[0]
     total_documentos = conn.execute("SELECT COUNT(*) FROM documentos").fetchone()[0]
     conn.close()
 
@@ -926,12 +913,8 @@ def bloquear_critico():
 def cerrar_sesiones_globales():
     """Fuerza el deslogueo en todos los navegadores regenerando la SECRET_KEY."""
     nueva_key = secrets.token_hex(32)
-    
-    # 1. Persistir en disco para futuros reinicios
     set_key(RUTA_ENV, "SECRET_KEY", nueva_key)
     os.environ["SECRET_KEY"] = nueva_key
-    
-    # 2. Rotación en caliente: invalida de inmediato las cookies en RAM sin reiniciar el .exe
     current_app.secret_key = nueva_key
     
     registrar_log("Cierre global: SECRET_KEY rotada en memoria y persistida en .env")
@@ -965,14 +948,12 @@ def exportar_backup():
         "documentos": docs
     }
 
-    # Registro de última fecha de exportación
     with open(RUTA_ULTIMO_BACKUP, "w", encoding="utf-8") as f:
         f.write(str(time.time()))
 
     fecha_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_bytes = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
-    # Caso 1: Paquete ZIP completo con carpeta de imágenes
     if incluir_imagenes:
         memoria_zip = io.BytesIO()
         with zipfile.ZipFile(memoria_zip, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -989,7 +970,6 @@ def exportar_backup():
         registrar_log("Exportación ZIP completada (Clips + Documentos + Imágenes)")
         return send_file(memoria_zip, as_attachment=True, download_name=nombre_zip, mimetype="application/zip")
 
-    # Caso 2: Solo base de datos en JSON
     memoria_json = io.BytesIO(json_bytes)
     nombre_json = f"pcm_backup_texto_{fecha_str}.json"
     registrar_log("Exportación JSON completada (Clips + Documentos)")
@@ -1023,7 +1003,6 @@ def importar_backup():
 
                 contenido = json.loads(zf.read(json_encontrado).decode("utf-8"))
 
-                # Restauración de imágenes físicas
                 for item in zf.namelist():
                     if item.startswith("imagenes/") and not item.endswith("/"):
                         nombre_img = os.path.basename(item)

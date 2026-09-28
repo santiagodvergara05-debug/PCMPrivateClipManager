@@ -1,5 +1,5 @@
 {# ============================================================================== #}
-{# PCM PRIVATE CLIP MANAGER - BLOC DE NOTAS, BORRADORES & REDACCIÓN (NOVELAS.HTML)#}
+{# PCM PRIVATE CLIP MANAGER - BLOC DE NOTAS, BORRADORES & REDACCIÓN (NOTAS.HTML)  #}
 {# ============================================================================== #}
 
 {% extends "base.html" %}
@@ -64,7 +64,7 @@
         </a>
     </div>
 
-<!-- PÍLDORAS DE FILTRADO POR CLASIFICACIÓN (5 CATEGORÍAS) -->
+    <!-- PÍLDORAS DE FILTRADO POR CLASIFICACIÓN -->
     <nav class="novel-filter-bar" id="barraFiltroNovelas">
         <button type="button" class="novel-pill active" data-tipo="todos" onclick="filtrarTipo('todos', this)">Todas</button>
         <button type="button" class="novel-pill" data-tipo="nota" onclick="filtrarTipo('nota', this)">📝 Notas</button>
@@ -72,6 +72,7 @@
         <button type="button" class="novel-pill" data-tipo="resumen" onclick="filtrarTipo('resumen', this)">📑 Resúmenes</button>
         <button type="button" class="novel-pill" data-tipo="apuntes" onclick="filtrarTipo('apuntes', this)">🎓 Apuntes</button>
         <button type="button" class="novel-pill" data-tipo="texto plano" onclick="filtrarTipo('texto plano', this)">📄 Bloc de Notas</button>
+        <button type="button" class="novel-pill" data-tipo="prompt" onclick="filtrarTipo('prompt', this)">💡 Prompts</button>
     </nav>
 
     <!-- GRILLA DINÁMICA DE TEXTOS Y NOTAS -->
@@ -79,25 +80,29 @@
         {% for n in resumenes %}
             {% set cat = n.categoria %}
             {% if cat == 'Nota' %}
-            {% set tipo_doc = 'Nota' %}
-            {% set badge_class = 'badge-nota' %}
-            {% set filtro_val = 'nota' %}
+                {% set tipo_doc = 'Nota' %}
+                {% set badge_class = 'badge-nota' %}
+                {% set filtro_val = 'nota' %}
             {% elif cat == 'Resumen' %}
-            {% set tipo_doc = 'Resumen' %}
-            {% set badge_class = 'badge-resumen' %}
-            {% set filtro_val = 'resumen' %}
+                {% set tipo_doc = 'Resumen' %}
+                {% set badge_class = 'badge-resumen' %}
+                {% set filtro_val = 'resumen' %}
             {% elif cat == 'Apuntes' %}
-            {% set tipo_doc = 'Apuntes' %}
-            {% set badge_class = 'badge-apuntes' %}
-            {% set filtro_val = 'apuntes' %}
+                {% set tipo_doc = 'Apuntes' %}
+                {% set badge_class = 'badge-apuntes' %}
+                {% set filtro_val = 'apuntes' %}
             {% elif cat in ['Texto Plano', 'Bloc de Notas'] %}
-            {% set tipo_doc = 'Bloc de Notas' %}
-            {% set badge_class = 'badge-texto' %}
-            {% set filtro_val = 'texto plano' %}
+                {% set tipo_doc = 'Bloc de Notas' %}
+                {% set badge_class = 'badge-texto' %}
+                {% set filtro_val = 'texto plano' %}
+            {% elif cat == 'Prompt' %}
+                {% set tipo_doc = 'Prompt' %}
+                {% set badge_class = 'badge-prompt' %}
+                {% set filtro_val = 'prompt' %}
             {% else %}
-            {% set tipo_doc = 'Borrador' %}
-            {% set badge_class = 'badge-borrador' %}
-            {% set filtro_val = 'borrador' %}
+                {% set tipo_doc = 'Borrador' %}
+                {% set badge_class = 'badge-borrador' %}
+                {% set filtro_val = 'borrador' %}
             {% endif %}
             {% set palabras = n.contenido.split()|length %}
             {% set min_lectura = (palabras / 200)|round(0, 'ceil')|int %}
@@ -110,7 +115,7 @@
                  data-tipo="{{ filtro_val }}">
             
             <!-- Respaldo del texto plano crudo para copiado inmediato -->
-           <textarea id="raw-novel-{{ n.id }}" style="display: none;" readonly>{{ n.contenido }}</textarea>
+            <textarea id="raw-novel-{{ n.id }}" style="display: none;" readonly>{{ n.contenido }}</textarea>
 
             <div class="novel-card-header">
                 <h3 class="novel-title" title="{{ n.titulo }}">{{ n.titulo if n.titulo else 'Nota sin título' }}</h3>
@@ -155,19 +160,10 @@
 <script>
 /**
  * ==============================================================================
- * PCM PRIVATE CLIP MANAGER - BLOC DE NOTAS & REDACCIÓN (NOVELAS.JS)
- * ==============================================================================
- * Responsabilidades:
- * 1. Búsqueda y filtrado reactivo en tiempo real por título, contenido y categoría.
- * 2. Operación de copiado universal con confirmación visual de estado.
- * 3. Eliminación asíncrona transaccional con animación fluida en el DOM.
- * 4. Navegación directa al editor en modo libre/redacción.
+ * PCM PRIVATE CLIP MANAGER - BLOC DE NOTAS & REDACCIÓN (NOTAS.JS)
  * ==============================================================================
  */
 
-/* ==============================================================================
-   SECCIÓN 1: DECLARACIÓN DE VARIABLES Y SELECTORES DEL DOM
-   ============================================================================== */
 const buscador = document.getElementById("buscadorNovelas");
 const btnLimpiar = document.getElementById("btnLimpiarBusquedaNovelas");
 const contenedor = document.getElementById("contenedorNovelas");
@@ -175,12 +171,6 @@ const contador = document.getElementById("contadorNovelas");
 const sinResultados = document.getElementById("noResultadosNovelas");
 let tipoActivo = "todos";
 
-/* ==============================================================================
-   SECCIÓN 2: MOTOR DE BÚSQUEDA Y FILTRADO
-   ============================================================================== */
-/**
- * Filtra las tarjetas en pantalla según la consulta de texto y la píldora activa.
- */
 function aplicarFiltrosNovelas() {
     const query = buscador.value.toLowerCase().trim();
     const cards = contenedor.querySelectorAll(".novel-card");
@@ -214,18 +204,12 @@ if (buscador) {
     buscador.addEventListener("input", aplicarFiltrosNovelas);
 }
 
-/**
- * Limpia el contenido de búsqueda y restaura la vista completa.
- */
 function limpiarFiltroNovelas() {
     buscador.value = "";
     aplicarFiltrosNovelas();
     buscador.focus();
 }
 
-/**
- * Filtra las notas por píldora (Todos, Borradores, Resúmenes).
- */
 function filtrarTipo(tipo, btn) {
     tipoActivo = tipo;
     document.querySelectorAll(".novel-pill").forEach(p => p.classList.remove("active"));
@@ -233,12 +217,6 @@ function filtrarTipo(tipo, btn) {
     aplicarFiltrosNovelas();
 }
 
-/* ==============================================================================
-   SECCIÓN 3: ACCIONES DEL USUARIO (COPIAR, NAVEGAR Y ELIMINAR)
-   ============================================================================== */
-/**
- * Copia el contenido de la nota al portapapeles con retroalimentación visual en el botón.
- */
 function copiarNovela(id, btn) {
     const raw = document.getElementById(`raw-novel-${id}`);
     if (!raw) return;
@@ -256,16 +234,10 @@ function copiarNovela(id, btn) {
     }
 }
 
-/**
- * Redirige al editor al hacer clic sobre el cuerpo de la nota.
- */
 function abrirEditor(id) {
     window.location.href = `/editor/${id}`;
 }
 
-/**
- * Elimina una nota de manera reactiva sin recargar la página completa.
- */
 async function eliminarNovela(id) {
     if (!confirm("¿Eliminar esta nota permanentemente?")) return;
 

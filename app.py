@@ -264,7 +264,8 @@ def auditar_integridad_db(db_path):
     Inspecciona la salud física del motor SQLite:
     - PRAGMA integrity_check para detectar páginas de disco corruptas.
     - Presencia de esquemas relacionales mínimos obligatorios ('clips', 'documentos').
-    - Cuantifica registros por categoría para telemetría.
+    - Migración preventiva de columnas si la base proviene de una versión anterior.
+    - Cuantifica registros por tipo estructural para telemetría.
     """
     if not os.path.exists(db_path):
         return "ausente", 0, 0, 0, 0
@@ -284,7 +285,10 @@ def auditar_integridad_db(db_path):
         if len(tablas) < 2:
             return "incompleta", 0, 0, 0, 0
 
-        # Cómputo de métricas directas por tipo estructural
+        # 1. Asegurar migración de columnas antes del cómputo de métricas
+        database.migrar_columna_tipo(conn)
+
+        # 2. Cómputo de métricas directas por tipo estructural
         cur.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'clip';")
         total_clips = cur.fetchone()[0]
 

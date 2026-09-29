@@ -50,7 +50,7 @@
         </div>
         <div class="stat-card">
             <span class="stat-num">{{ total_resumenes }}</span>
-            <span class="stat-label">📖 Borradores & Resúmenes</span>
+            <span class="stat-label">📝 Bloc de Notas</span>
         </div>
         <div class="stat-card">
             <span class="stat-num">{{ total_codigo }}</span>
@@ -179,7 +179,7 @@
             <span class="badge-exclusive">Exclusivo PCMPrivateClipManager</span>
         </div>
         <p class="card-desc">
-            Exporta o restaura todo tu contenido (clips, novelas, snippets y documentos). El motor detecta automáticamente respaldos ligeros (.JSON) o completos (.ZIP).
+            Exporta o restaura todo tu contenido (clips, notas, snippets y documentos). El motor detecta automáticamente respaldos ligeros (.JSON) o completos (.ZIP).
         </p>
 
         <div class="backup-dual-grid">
@@ -193,7 +193,7 @@
                         <span class="tile-icon">📄</span>
                         <div class="tile-text">
                             <strong>Respaldo Ligero (.JSON)</strong>
-                            <small>Solo texto de clips, prompts y documentos</small>
+                            <small>Solo texto de clips, notas, código y documentos</small>
                         </div>
                     </a>
 
@@ -243,7 +243,7 @@
     <section class="config-card danger-card">
         <h3 style="color: #ff5252;">⚠️ Zona de Peligro</h3>
         {% if desbloqueo_critico_activo %}
-            <p class="card-desc">Esta acción vaciará por completo la base de datos (clips, novelas y documentos). No se puede deshacer.</p>
+            <p class="card-desc">Esta acción vaciará por completo la base de datos (clips, notas, código y documentos). No se puede deshacer.</p>
             <form method="POST" action="{{ url_for('clips.borrar_todo') }}" onsubmit="return confirm('¿CONFIRMAR VACIADO TOTAL? Se eliminarán absolutamente todos los registros.');">
                 <button type="submit" class="btn-config danger">🗑️ Borrar toda la base de datos</button>
             </form>

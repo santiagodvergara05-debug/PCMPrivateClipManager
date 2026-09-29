@@ -872,7 +872,7 @@ def configuracion():
         "config.html",
         total_clips=total_clips,
         total_codigo=total_codigo,
-        total_notas=total_resumenes,
+        total_resumenes=total_resumenes,
         total_documentos=total_documentos,
         peso_db=peso_db,
         peso_imagenes=peso_imagenes,

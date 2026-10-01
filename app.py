@@ -9,7 +9,8 @@ Punto de entrada principal del sistema. Responsabilidades:
 4. Motor de autorreparación, sanitización y serialización segura del archivo .env.
 5. Auditoría de integridad estructural y concurrencia de la base de datos SQLite.
 6. Aprovisionamiento, saneamiento de directorios y purga de archivos huérfanos.
-7. Resolución dinámica de interfaz local/LAN y puesta en marcha del servidor.
+7. Comprobación y sincronización de bóvedas cifradas BYOC (E2EE AES-256).
+8. Resolución dinámica de interfaz local/LAN y puesta en marcha del servidor.
 ==============================================================================
 """
 
@@ -35,6 +36,7 @@ from logger_http import configurar_logger_http
 
 # Módulos internos de la arquitectura PCM
 import database
+import sync_manager
 from routes import clips_bp, RUTA_ULTIMO_BACKUP
 from version import VERSION
 
@@ -127,6 +129,14 @@ VALORES_PREDETERMINADOS = {
     "SISTEMA_INICIALIZADO": "true",
     "MASTER_KEY": lambda: secrets.token_hex(32),
     "APP_PASSWORD": "cambiame",
+    # Módulo de Sincronización BYOC (E2EE)
+    "SYNC_HABILITADO": "false",
+    "SYNC_CARPETA": "",
+    "SYNC_MODO_CIFRADO": "auto",  # 'auto', 'manual' o 'libre'
+    "SYNC_CLAVE": lambda: secrets.token_hex(32),
+    "SYNC_AUTO_APLICAR": "true",
+    "SYNC_NOMBRE_DISPOSITIVO": lambda: socket.gethostname(),
+    "SYNC_ULTIMA_REVISION": "0",
 }
 
 def serializar_valor_env(valor):
@@ -161,7 +171,6 @@ def sanitizar_y_reparar_env(ruta_env):
             archivo_danado = True
 
     if archivo_danado:
-        ya_inicializado = True
         klog("fail", "Archivo .env ilegible o corrupto (sabotaje de datos binarios).")
         quarantine = f".env.corrupt_{int(time.time())}"
         try:
@@ -189,6 +198,15 @@ def sanitizar_y_reparar_env(ruta_env):
 
     for clave, valor_default in VALORES_PREDETERMINADOS.items():
         val = valores.get(clave)
+
+        # SYNC_CARPETA puede estar vacía legítimamente si aún no se configuró ruta
+        if clave == "SYNC_CARPETA":
+            if val is None:
+                valores[clave] = ""
+                faltantes.append(clave)
+                hubo_cambios = True
+            continue
+
         if val is None or not str(val).strip():
             nuevo_val = valor_default() if callable(valor_default) else valor_default
             valores[clave] = nuevo_val
@@ -227,42 +245,30 @@ def sanitizar_y_reparar_env(ruta_env):
 # SECCIÓN 5: AUDITORÍA AVANZADA DE INTEGRIDAD SQLITE (BLINDADA)
 # ==============================================================================
 def auditar_integridad_db(db_path):
-    """
-    Inspecciona la salud física del motor SQLite de forma segura:
-    - PRAGMA integrity_check: Única prueba concluyente de corrupción física.
-    - Asegura las tablas requeridas ('clips', 'documentos').
-    - Migración preventiva con row_factory habilitado.
-    - Cuantifica métricas en bloque protegido sin arriesgar la base de datos.
-    """
     if not os.path.exists(db_path):
         return "ausente", 0, 0, 0, 0
 
     conn = None
     try:
-        # Timeout extendido a 5.0 segundos para evitar bloqueos en Windows
         conn = sqlite3.connect(db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # 1. Comprobación estricta de páginas y disco
         cur.execute("PRAGMA integrity_check;")
         res = cur.fetchone()
         if not res or res[0] != "ok":
             return "corrupta", 0, 0, 0, 0
 
-        # 2. Comprobación de esquemas relacionales
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('clips', 'documentos');")
         tablas = [r["name"] for r in cur.fetchall()]
         if "clips" not in tablas:
             return "incompleta", 0, 0, 0, 0
 
-        # 3. Migración segura de columnas si aún no existían
         try:
             database.migrar_columna_tipo(conn)
         except Exception:
             pass
 
-        # 4. Conteo de métricas protegido a prueba de excepciones
         def contar_seguro(query):
             try:
                 cur.execute(query)
@@ -285,7 +291,6 @@ def auditar_integridad_db(db_path):
         return "corrupta", 0, 0, 0, 0
 
     except Exception:
-        # Si la comprobación de integridad física ya fue exitosa, no se aísla el archivo
         return "ok", 0, 0, 0, 0
 
     finally:
@@ -389,7 +394,58 @@ if __name__ == "__main__":
         klog("init", "Verificando estructura de almacenamiento...")
         sanear_directorios_y_archivos(ya_inicializado=ya_inicializado)
 
-        # 3. Auditoría de integridad de base de datos SQLite
+        # 3. Comprobación de Bóveda Externa / Nube (Sincronización BYOC)
+        sync_activa = os.environ.get("SYNC_HABILITADO", "false").strip().lower() == "true"
+        carpeta_nube = os.environ.get("SYNC_CARPETA", "").strip()
+
+        if sync_activa and carpeta_nube:
+            klog("init", f"Verificando sincronización BYOC: {carpeta_nube}")
+            if not os.path.isdir(carpeta_nube):
+                klog("warn", "Carpeta de sincronización inalcanzable. Operando en modo local.")
+            else:
+                auto_aplicar = os.environ.get("SYNC_AUTO_APLICAR", "false").strip().lower() == "true"
+                if not auto_aplicar:
+                    klog("info", "Política de sincronización: Manual (auto-aplicar desactivado).")
+
+                meta = sync_manager.leer_metadatos_remotos(carpeta_nube)
+                if meta:
+                    rev_remota = int(meta.get("revision", 0))
+                    try:
+                        rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
+                    except ValueError:
+                        rev_local = 0
+
+                    origen = meta.get("ultimo_equipo", "Nodo Externo")
+
+                    if rev_remota > rev_local:
+                        klog("info", f"Revisión #{rev_remota} disponible desde '{origen}' (Local: #{rev_local}).")
+                        if auto_aplicar:
+                            klog("init", "Aplicando actualización de bóveda de forma segura...")
+                            modo_cif = os.environ.get("SYNC_MODO_CIFRADO", "auto").strip().lower()
+                            clave = "" if modo_cif == "libre" else os.environ.get("SYNC_CLAVE", "").strip()
+
+                            exito, msg = sync_manager.importar_boveda_cifrada(
+                                carpeta_nube, DB_PATH, UPLOADS_DIR, clave
+                            )
+                            if exito:
+                                klog("ok", msg)
+                                try:
+                                    set_key(ENV_PATH, "SYNC_ULTIMA_REVISION", str(rev_remota))
+                                    os.environ["SYNC_ULTIMA_REVISION"] = str(rev_remota)
+                                except Exception:
+                                    pass
+                            else:
+                                klog("fail", f"Sincronización rechazada: {msg}")
+                        else:
+                            klog("warn", f"Actualización pendiente (Nube #{rev_remota} > Local #{rev_local}). Auto-aplicar desactivado.")
+                    elif rev_remota == rev_local:
+                        klog("ok", f"Bóveda sincronizada al día (Revisión #{rev_local}).")
+                    else:
+                        klog("info", f"Bóveda local por delante de la nube (Local: #{rev_local}, Nube: #{rev_remota}).")
+                else:
+                    klog("info", "Carpeta externa conectada (sin bóveda remota existente).")
+
+        # 4. Auditoría de integridad de base de datos SQLite
         estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
 
         if estado_db == "bloqueada":
@@ -424,7 +480,7 @@ if __name__ == "__main__":
             database.inicializar_db()
             klog("ok", f"Base verificada: {n_clips} clips, {n_codigos} cod, {n_resumenes} notas, {n_docs} docs.")
 
-        # 4. Verificación de última instantánea de respaldo
+        # 5. Verificación de última instantánea de respaldo
         ruta_backup = os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_BACKUP)
         if os.path.exists(ruta_backup):
             try:
@@ -437,7 +493,7 @@ if __name__ == "__main__":
         else:
             klog("info", "No se detecta snapshot de respaldo previo.")
 
-        # 5. Detección y advertencia de credenciales por defecto
+        # 6. Detección y advertencia de credenciales por defecto
         contrasena_ya_mostrada = os.environ.get("CONTRASENA_MOSTRADA", "false").strip().lower() == "true"
         if os.environ.get("APP_PASSWORD") == "cambiame" and not contrasena_ya_mostrada:
             print("\n" + "!" * 65)
@@ -482,7 +538,7 @@ if __name__ == "__main__":
             klog("info", "Acceso multidispositivo habilitado en la red local.")
         else:
             klog("ok", f"Servidor Local enrutado en http://{host}:{port}")
-            klog("fail", f"Acceso LAN Red: no disponible")
+            klog("fail", "Acceso LAN Red: no disponible")
             klog("info", "Acceso LAN Red: Desactivado (modo exclusivo PC local)")
 
         print("-" * 65)

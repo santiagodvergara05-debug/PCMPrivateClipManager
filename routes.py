@@ -8,11 +8,14 @@ Núcleo de peticiones HTTP para Flask. Gestiona:
 3. Persistencia de Documentos técnicos (Markdown, KaTeX, Mermaid).
 4. Subida segura y validación binaria de imágenes (Tope estricto de 25 MiB).
 5. Sistema de exportación/importación de backups (.json y .zip con assets).
-6. Diagnóstico y mantenimiento del sistema de archivos y base de datos SQLite.
+6. Sincronización BYOC multidispositivo con cifrado E2EE (AES-256).
+7. Diagnóstico y mantenimiento del sistema de archivos y base de datos SQLite.
 ==============================================================================
 """
 
 import os
+import sys
+import subprocess
 import io
 import json
 import time
@@ -38,6 +41,7 @@ from flask import (
 from dotenv import set_key, dotenv_values
 
 import database
+import sync_manager
 from version import VERSION
 
 # Instanciación del Blueprint principal
@@ -46,103 +50,74 @@ clips_bp = Blueprint("clips", __name__)
 # ==============================================================================
 # CONFIGURACIONES Y CONSTANTES DE OPERACIÓN
 # ==============================================================================
-# Token volátil generado en RAM cada vez que arranca Flask. Invalida desbloqueos previos.
 INICIO_SERVIDOR = secrets.token_hex(8)
-
-# Tiempo de gracia (en segundos) para modificar configuraciones maestras/críticas
 DURACION_DESBLOQUEO = 120  # 2 minutos
 
-# Rutas locales de configuración y auditoría
 RUTA_ENV = ".env"
 RUTA_ULTIMO_BACKUP = "ultimo_backup.txt"
 
-# Clasificación de categorías que usan la vista extendida de novela/borrador
 CATEGORIAS_TEXTO_LARGO = ("Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano", "Novelas", "Prompt")
-
-# Directorio de almacenamiento para imágenes asociadas a documentos Markdown
 CARPETA_IMAGENES_DOCS = os.path.join("static", "uploads", "documentos")
 
-# Límite estricto de archivo individual para subidas multimedia (25 MiB)
 LIMITE_MB_IMAGEN = 25
-MAX_BYTES_IMAGEN = LIMITE_MB_IMAGEN * 1024 * 1024  # 26,214,400 bytes
+MAX_BYTES_IMAGEN = LIMITE_MB_IMAGEN * 1024 * 1024
 
-# Extensiones autorizadas por nomenclatura
 EXTENSIONES_PERMITIDAS = {"png", "jpg", "jpeg", "gif", "webp"}
 
-# Firmas binarias estándar (Magic Bytes) para validación real contra exploits
 CABECERAS_MAGICAS = {
     b"\x89PNG\r\n\x1a\n": "png",
     b"\xff\xd8\xff": "jpg",
     b"GIF87a": "gif",
     b"GIF89a": "gif",
-    b"RIFF": "webp"  # WebP inicia con RIFF y lleva WEBP en el offset 8
+    b"RIFF": "webp"
 }
 
 
 # ==============================================================================
 # SECCIÓN 1: UTILIDADES DE SISTEMA, AUDITORÍA Y REGISTRO EN TERMINAL
 # ==============================================================================
-
-# Paleta ANSI de alta visibilidad para terminales modernas (Dark Theme)
-CLR_RESET   = "\033[0m"
-CLR_GRIS    = "\033[90m"
-CLR_AZUL    = "\033[94m"
-CLR_CYAN    = "\033[96m"
-CLR_VERDE   = "\033[92m"
-CLR_AMARILLO= "\033[93m"
-CLR_ROJO    = "\033[91m"
-CLR_MAGENTA = "\033[95m"
-CLR_BOLD    = "\033[1m"
+CLR_RESET    = "\033[0m"
+CLR_GRIS     = "\033[90m"
+CLR_AZUL     = "\033[94m"
+CLR_CYAN     = "\033[96m"
+CLR_VERDE    = "\033[92m"
+CLR_AMARILLO = "\033[93m"
+CLR_ROJO     = "\033[91m"
+CLR_MAGENTA  = "\033[95m"
+CLR_BOLD     = "\033[1m"
 
 def registrar_log(accion, tipo=None):
-    """
-    Imprime eventos en consola con formato enriquecido, marcas temporales 
-    e insignias coloreadas según la criticidad del evento.
-    """
     if os.environ.get("LOG_MODE", "true").lower() != "true":
         return
 
     hora = datetime.now().strftime("%H:%M:%S")
     accion_lower = accion.lower()
 
-    # 1. Alertas y Errores Críticos
     if tipo == "ERROR" or any(k in accion_lower for k in ["error", "fallid", "rechazad", "peligro", "no autorizada"]):
         badge = f"{CLR_BOLD}{CLR_ROJO}✖ [PCM :: ALERTA]{CLR_RESET}"
         texto_formateado = f"{CLR_ROJO}{accion}{CLR_RESET}"
-
-    # 2. Creación, Guardado y Actualización (Se evalúa primero para capturar notas y borradores)
     elif tipo == "SUCCESS" or any(k in accion_lower for k in ["éxito", "exitos", "cread", "guardad", "actualizad", "iniciad"]):
         badge = f"{CLR_BOLD}{CLR_VERDE}✔ [PCM :: ÉXITO]{CLR_RESET}"
         texto_formateado = f"{CLR_VERDE}{accion}{CLR_RESET}"
-
-    # 3. Eliminaciones (Usa estrictamente la raíz 'elimin' para no colisionar con 'Borrador')
     elif tipo == "DELETE" or any(k in accion_lower for k in ["elimin", "purgada", "vaciado total"]):
         badge = f"{CLR_BOLD}{CLR_MAGENTA}🗑 [PCM :: DELETE]{CLR_RESET}"
         texto_formateado = f"{CLR_MAGENTA}{accion}{CLR_RESET}"
-
-    # 4. Operaciones de Sistema, Llaves y Sesiones
-    elif tipo == "SYS" or any(k in accion_lower for k in ["desbloque", "bloque", "sesión", "rotad", "crític"]):
+    elif tipo == "SYS" or any(k in accion_lower for k in ["desbloque", "bloque", "sesión", "rotad", "crític", "sync"]):
         badge = f"{CLR_BOLD}{CLR_AMARILLO}⚡ [PCM :: SYS]{CLR_RESET}"
         texto_formateado = f"{CLR_AMARILLO}{accion}{CLR_RESET}"
-
-    # 5. Información general
     else:
         badge = f"{CLR_BOLD}{CLR_CYAN}ℹ [PCM :: INFO]{CLR_RESET}"
         texto_formateado = f"{CLR_CYAN}{accion}{CLR_RESET}"
 
-    # Salida por consola formateada
-    print(f"{CLR_GRIS}[{hora}]{CLR_RESET} {badge} {texto_formateado}") 
+    print(f"{CLR_GRIS}[{hora}]{CLR_RESET} {badge} {texto_formateado}")
 
 
 def esta_desbloqueado():
-    """Valida si la sesión actual posee autorización para ejecutar acciones críticas en ajustes."""
     if not session.get("desbloqueo_critico"):
         return False
-    # Si el servidor se reinició, el token volátil no coincidirá -> sesión invalidada
     if session.get("desbloqueo_servidor") != INICIO_SERVIDOR:
         session.pop("desbloqueo_critico", None)
         return False
-    # Verificación de tiempo de expiración
     if time.time() > session.get("desbloqueo_expira", 0):
         session.pop("desbloqueo_critico", None)
         return False
@@ -150,36 +125,28 @@ def esta_desbloqueado():
 
 
 def login_requerido(f):
-    """Decorador para proteger rutas contra accesos no autenticados en la red LAN."""
     @wraps(f)
     def decorador(*args, **kwargs):
         if not session.get("autenticado"):
-            # Si alguien intenta modificar estado (POST/PUT/DELETE) sin estar autenticado
             if request.method in ["POST", "PUT", "DELETE"]:
                 ip = request.remote_addr
                 print(f"\n\033[91m[SEGURIDAD :: PETICIÓN NO AUTORIZADA]\033[0m Intento de llamada {request.method} sin sesión a '{request.path}' desde IP: {ip}")
                 if request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest":
                     return jsonify({"ok": False, "error": "Sesión no válida o expirada."}), 401
-
             return redirect(url_for("clips.login"))
         return f(*args, **kwargs)
     return decorador
 
 
 def extension_valida(nombre_archivo):
-    """Verifica sintácticamente la extensión del archivo según la lista permitida."""
     return "." in nombre_archivo and nombre_archivo.rsplit(".", 1)[1].lower() in EXTENSIONES_PERMITIDAS
 
 
 def validar_firma_binaria_imagen(stream):
-    """
-    Inspecciona la cabecera binaria del flujo de datos (Magic Bytes).
-    Evita ataques de inyección donde se camuflan ejecutables con extensión .png.
-    """
     posicion_original = stream.tell()
     stream.seek(0)
     cabecera = stream.read(32)
-    stream.seek(posicion_original)  # Restablece el puntero de lectura para poder guardarlo luego
+    stream.seek(posicion_original)
 
     for firma, ext in CABECERAS_MAGICAS.items():
         if cabecera.startswith(firma):
@@ -190,7 +157,6 @@ def validar_firma_binaria_imagen(stream):
 
 
 def formatear_tamano(bytes_cant):
-    """Convierte una cantidad de bytes a una cadena amigable legible para humanos (B, KB, MB)."""
     if bytes_cant < 1024:
         return f"{bytes_cant} B"
     elif bytes_cant < 1024 * 1024:
@@ -201,7 +167,6 @@ def formatear_tamano(bytes_cant):
 
 @clips_bp.app_context_processor
 def inyectar_contexto():
-    """Inyecta variables globales en todos los templates HTML renderizados."""
     return {
         "app_version": VERSION
     }
@@ -213,11 +178,9 @@ def inyectar_contexto():
 
 @clips_bp.route("/login", methods=["GET", "POST"])
 def login():
-    # Si el usuario ya está autenticado, va directo al panel principal
     if session.get("autenticado"):
         return redirect(url_for("clips.index"))
 
-    # Verifica si es el primer inicio ('false' muestra el cartel, 'true' lo oculta)
     mostrar_credenciales = os.environ.get("CONTRASENA_MOSTRADA", "false").strip().lower() != "true"
     error = None
 
@@ -226,7 +189,6 @@ def login():
         app_password = os.environ.get("APP_PASSWORD", "cambiame").strip()
         master_key = os.environ.get("MASTER_KEY", "").strip()
 
-        # Validación contra APP_PASSWORD o MASTER_KEY
         if password_ingresada and (password_ingresada == app_password or (master_key and password_ingresada == master_key)):
             session["autenticado"] = True
             session.permanent = True
@@ -236,7 +198,6 @@ def login():
             except Exception:
                 pass
 
-            # Si era el primer inicio, muta el .env a true para ocultar credenciales a futuro
             if mostrar_credenciales:
                 try:
                     set_key(RUTA_ENV, "CONTRASENA_MOSTRADA", "true")
@@ -270,7 +231,6 @@ def login():
 
 @clips_bp.route("/logout")
 def logout():
-    """Limpia las variables de sesión y redirige a la pantalla de login."""
     session.clear()
     registrar_log("Cierre de sesión manual ejecutado")
     return redirect(url_for("clips.login"))
@@ -283,18 +243,15 @@ def logout():
 @clips_bp.route("/")
 @login_requerido
 def index():
-    """Panel principal: lista clips activos y depura los que hayan caducado."""
     database.purgar_expirados()
     conn = database.obtener_conexion()
 
-    # Obtener clips únicamente de tipo 'clip'
     clips = conn.execute("""
         SELECT * FROM clips 
         WHERE tipo = 'clip'
         ORDER BY es_favorito DESC, id DESC
     """).fetchall()
 
-    # Listado dinámico de etiquetas/categorías SOLO de clips
     categorias_raw = conn.execute("""
         SELECT DISTINCT categoria 
         FROM clips 
@@ -311,7 +268,6 @@ def index():
 @clips_bp.route("/crear", methods=["POST"])
 @login_requerido
 def crear():
-    """Crea un nuevo clip rápido con tiempo de autodestrucción opcional."""
     titulo = request.form.get("titulo", "").strip()
     contenido = request.form.get("contenido", "").strip()
     categoria = request.form.get("categoria", "General").strip() or "General"
@@ -338,7 +294,6 @@ def crear():
 @clips_bp.route("/favorito/<int:clip_id>", methods=["POST"])
 @login_requerido
 def alternar_favorito(clip_id):
-    """Fija o desfija un clip al inicio de la bandeja."""
     conn = database.obtener_conexion()
     clip = conn.execute("SELECT es_favorito, titulo FROM clips WHERE id = ?", (clip_id,)).fetchone()
 
@@ -356,7 +311,6 @@ def alternar_favorito(clip_id):
 @clips_bp.route("/editar/<int:clip_id>", methods=["POST"])
 @login_requerido
 def editar_clip(clip_id):
-    """Actualiza la información, contenido o temporizador de un clip."""
     titulo = request.form.get("titulo", "").strip()
     categoria = request.form.get("categoria", "General").strip() or "General"
     contenido = request.form.get("contenido", "").strip()
@@ -397,11 +351,11 @@ def editar_clip(clip_id):
 @clips_bp.route("/eliminar/<int:clip_id>", methods=["GET", "POST", "DELETE"])
 @login_requerido
 def eliminar(clip_id):
-    """Elimina clips de cualquier categoría soportando llamadas estándar y fetch/AJAX."""
     conn = database.obtener_conexion()
-    clip = conn.execute("SELECT categoria, titulo FROM clips WHERE id = ?", (clip_id,)).fetchone()
-    es_texto_largo = clip and clip["categoria"] in CATEGORIAS_TEXTO_LARGO
-    es_codigo = clip and clip["categoria"].startswith("Codigo:")
+    clip = conn.execute("SELECT categoria, tipo, titulo FROM clips WHERE id = ?", (clip_id,)).fetchone()
+    
+    es_texto_largo = clip and (clip["tipo"] == "nota" or clip["categoria"] in CATEGORIAS_TEXTO_LARGO)
+    es_codigo = clip and (clip["tipo"] == "codigo" or clip["categoria"].startswith("Codigo:"))
     titulo = clip["titulo"] if clip else str(clip_id)
 
     conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
@@ -426,7 +380,6 @@ def eliminar(clip_id):
 @clips_bp.route("/notas")
 @login_requerido
 def biblioteca_novelas():
-    """Muestra el catálogo de textos extensos."""
     conn = database.obtener_conexion()
     resumenes = conn.execute("""
         SELECT * FROM clips 
@@ -441,7 +394,6 @@ def biblioteca_novelas():
 @clips_bp.route("/editor/<int:clip_id>")
 @login_requerido
 def editor(clip_id=None):
-    """Carga la interfaz del editor simple de notas/borradores/prompts."""
     clip = None
     if clip_id:
         conn = database.obtener_conexion()
@@ -453,7 +405,6 @@ def editor(clip_id=None):
 @clips_bp.route("/guardar_resumen", methods=["POST"])
 @login_requerido
 def guardar_resumen():
-    """Persiste los cambios del editor simple de borradores."""
     clip_id = request.form.get("clip_id")
     titulo = request.form.get("titulo", "").strip() or "Texto sin título"
     tipo_doc = request.form.get("tipo_doc", "Borrador").strip()
@@ -496,15 +447,14 @@ def guardar_resumen():
 @clips_bp.route("/codigo")
 @login_requerido
 def seccion_codigo():
-    """Biblioteca especializada en fragmentos de código ordenados por lenguaje."""
     conn = database.obtener_conexion()
     snippets = conn.execute(
-        "SELECT * FROM clips WHERE categoria LIKE 'Codigo:%' ORDER BY id DESC"
+        "SELECT * FROM clips WHERE tipo = 'codigo' OR categoria LIKE 'Codigo:%' ORDER BY id DESC"
     ).fetchall()
 
     lenguajes_raw = conn.execute("""
         SELECT DISTINCT categoria FROM clips 
-        WHERE categoria LIKE 'Codigo:%' 
+        WHERE tipo = 'codigo' OR categoria LIKE 'Codigo:%' 
         ORDER BY categoria ASC
     """).fetchall()
     lenguajes = [r["categoria"].replace("Codigo:", "") for r in lenguajes_raw]
@@ -516,14 +466,12 @@ def seccion_codigo():
 @clips_bp.route("/codigo/nuevo")
 @login_requerido
 def nuevo_codigo():
-    """Abre el formulario para añadir un nuevo snippet de código."""
     return render_template("agregar_codigo.html")
 
 
 @clips_bp.route("/codigo/guardar", methods=["POST"])
 @login_requerido
 def guardar_codigo():
-    """Registra un nuevo snippet de programación asociando el prefijo de lenguaje."""
     titulo = request.form.get("titulo", "").strip() or "Snippet sin título"
     lenguaje = request.form.get("lenguaje", "Texto").strip()
     contenido = request.form.get("contenido", "").strip()
@@ -548,7 +496,6 @@ def guardar_codigo():
 @clips_bp.route("/codigo/editar/<int:clip_id>", methods=["POST"])
 @login_requerido
 def editar_codigo(clip_id):
-    """Actualiza el lenguaje, título o contenido de un snippet."""
     titulo = request.form.get("titulo", "").strip() or "Snippet sin título"
     lenguaje = request.form.get("lenguaje", "Texto").strip()
     contenido = request.form.get("contenido", "").strip()
@@ -558,7 +505,7 @@ def editar_codigo(clip_id):
         conn = database.obtener_conexion()
         conn.execute("""
             UPDATE clips 
-            SET titulo = ?, categoria = ?, contenido = ?
+            SET titulo = ?, categoria = ?, contenido = ?, tipo = 'codigo'
             WHERE id = ?
         """, (titulo, categoria_codigo, contenido, clip_id))
         conn.commit()
@@ -575,7 +522,6 @@ def editar_codigo(clip_id):
 @clips_bp.route("/fusionador")
 @login_requerido
 def fusionador():
-    """Herramienta para concatenar prompts y formatear textos combinados."""
     registrar_log("Herramienta Fusionador de textos abierta")
     return render_template("fusionador.html")
 
@@ -587,7 +533,6 @@ def fusionador():
 @clips_bp.route("/documentos")
 @login_requerido
 def documentos():
-    """Hub central: lista la biblioteca de documentos técnicos guardados."""
     conn = database.obtener_conexion()
     cursor = conn.cursor()
     cursor.execute("""
@@ -603,14 +548,12 @@ def documentos():
 @clips_bp.route("/documentos/estudio")
 @login_requerido
 def documentos_nuevo():
-    """Abre el editor profesional (documentos.html) en blanco."""
     return render_template("documentos.html", doc=None)
 
 
 @clips_bp.route("/documentos/estudio/<int:doc_id>")
 @login_requerido
 def documentos_editar(doc_id):
-    """Carga un documento persistido en el editor para su modificación."""
     conn = database.obtener_conexion()
     cursor = conn.cursor()
     cursor.execute("SELECT id, titulo, contenido FROM documentos WHERE id = ?", (doc_id,))
@@ -654,20 +597,16 @@ def api_guardar_documento():
     conn.commit()
     conn.close()
 
-    # ---> REGISTRO EN CONSOLA:
     registrar_log(accion_desc)
-
     return jsonify({"ok": True, "id": nuevo_id, "titulo": titulo})
 
 
 @clips_bp.route("/documentos/eliminar/<int:doc_id>", methods=["POST"])
 @login_requerido
 def eliminar_documento(doc_id):
-    """Elimina permanentemente un documento de la tabla 'documentos'."""
     conn = database.obtener_conexion()
     cursor = conn.cursor()
 
-    # Obtener el título antes de borrarlo para registrarlo en el log
     cursor.execute("SELECT titulo FROM documentos WHERE id = ?", (doc_id,))
     doc = cursor.fetchone()
     titulo_doc = doc["titulo"] if doc else f"ID #{doc_id}"
@@ -676,9 +615,7 @@ def eliminar_documento(doc_id):
     conn.commit()
     conn.close()
 
-    # ---> REGISTRO EN CONSOLA:
     registrar_log(f"Documento eliminado: '{titulo_doc}'")
-
     flash("Documento eliminado correctamente.", "info")
     return redirect(url_for("clips.documentos"))
 
@@ -690,14 +627,6 @@ def eliminar_documento(doc_id):
 @clips_bp.route("/documentos/api/subir_imagen", methods=["POST"])
 @login_requerido
 def api_subir_imagen_documento():
-    """
-    Sube una imagen al servidor aplicando validación en capas:
-    1. Existencia y nombre válido.
-    2. Límite físico en stream (<= 25 MiB).
-    3. Extensión declarada válida.
-    4. Inspección binaria de Magic Bytes para verificar que sea una imagen real.
-    5. Asignación de UUID seguro para prevenir Path Traversal y sobreescrituras.
-    """
     if "imagen" not in request.files:
         return jsonify({"ok": False, "error": "No se envió ningún archivo en la petición."}), 400
 
@@ -705,7 +634,6 @@ def api_subir_imagen_documento():
     if not archivo or archivo.filename == "":
         return jsonify({"ok": False, "error": "El nombre del archivo está vacío."}), 400
 
-    # Comprobación estricta de tamaño en stream (Límite 25 MiB)
     archivo.seek(0, os.SEEK_END)
     tamano_bytes = archivo.tell()
     archivo.seek(0)
@@ -716,14 +644,12 @@ def api_subir_imagen_documento():
             "error": f"El archivo supera el límite permitido de {LIMITE_MB_IMAGEN} MB ({formatear_tamano(tamano_bytes)})."
         }), 413
 
-    # Validación de extensión de archivo
     if not extension_valida(archivo.filename):
         return jsonify({
             "ok": False, 
             "error": "Extensión no permitida. Formatos aceptados: PNG, JPG, JPEG, GIF, WEBP."
         }), 400
 
-    # Inspección binaria de cabeceras (Magic Bytes)
     formato_real = validar_firma_binaria_imagen(archivo.stream)
     if not formato_real:
         ip = request.remote_addr
@@ -733,7 +659,6 @@ def api_subir_imagen_documento():
             "error": "El archivo está dañado o no corresponde a una imagen válida (firma binaria rechazada)."
         }), 400
 
-    # Guardado seguro en disco con identificador UUID
     os.makedirs(CARPETA_IMAGENES_DOCS, exist_ok=True)
     nombre_limpio = secure_filename(archivo.filename)
     nombre_seguro = f"img_{uuid.uuid4().hex[:12]}.{formato_real}"
@@ -755,7 +680,6 @@ def api_subir_imagen_documento():
 @clips_bp.route("/documentos/api/imagenes", methods=["GET"])
 @login_requerido
 def api_listar_imagenes_documentos():
-    """Devuelve la colección de imágenes del servidor para poblar la galería del editor."""
     os.makedirs(CARPETA_IMAGENES_DOCS, exist_ok=True)
     imagenes = []
 
@@ -769,7 +693,6 @@ def api_listar_imagenes_documentos():
                         "url": f"/static/uploads/documentos/{archivo}",
                         "fecha": os.path.getmtime(ruta_completa)
                     })
-        # Ordenar por fecha de modificación (las más recientes primero)
         imagenes.sort(key=lambda x: x["fecha"], reverse=True)
     except Exception as e:
         registrar_log(f"Error al listar galería de imágenes: {e}")
@@ -780,7 +703,6 @@ def api_listar_imagenes_documentos():
 @clips_bp.route("/documentos/api/eliminar_imagen/<nombre>", methods=["POST"])
 @login_requerido
 def api_eliminar_imagen_documento(nombre):
-    """Elimina una imagen puntual del disco garantizando que no haya escape de directorio."""
     if os.path.basename(nombre) != nombre or not extension_valida(nombre):
         ip = request.remote_addr
         print(f"\n\033[91m[ALERTA DE INTRUSIÓN :: PATH TRAVERSAL]\033[0m Parámetro malicioso interceptado en borrado: '{nombre}' | IP: {ip}")
@@ -800,7 +722,7 @@ def api_eliminar_imagen_documento(nombre):
 
 
 # ==============================================================================
-# SECCIÓN 9: AJUSTES DE SISTEMA, GESTIÓN DE BACKUPS Y PURGA
+# SECCIÓN 9: AJUSTES DE SISTEMA, GESTIÓN DE BACKUPS, PURGA Y SINCRONIZACIÓN BYOC
 # ==============================================================================
 
 @clips_bp.route("/configuracion", methods=["GET", "POST"])
@@ -812,6 +734,7 @@ def configuracion():
 
     if request.method == "POST":
         if not desbloqueado:
+            flash("La configuración crítica se encuentra bloqueada. Use la Master Key para desbloquearla.", "error")
             return redirect(url_for("clips.configuracion"))
 
         nueva_pass = request.form.get("app_password", "").strip()
@@ -838,7 +761,86 @@ def configuracion():
         set_key(RUTA_ENV, "AUTO_ABRIR_NAVEGADOR", auto_abrir)
         os.environ["AUTO_ABRIR_NAVEGADOR"] = auto_abrir
 
-        registrar_log("Ajustes del servidor y variables .env actualizadas")
+# --- Variables de Sincronización BYOC (E2EE) ---
+        sync_hab = "true" if "sync_habilitado" in request.form else "false"
+        set_key(RUTA_ENV, "SYNC_HABILITADO", sync_hab)
+        os.environ["SYNC_HABILITADO"] = sync_hab
+
+        sync_carp = request.form.get("sync_carpeta", "").strip()
+        if sync_carp:
+            try:
+                os.makedirs(sync_carp, exist_ok=True)
+            except Exception:
+                pass
+        set_key(RUTA_ENV, "SYNC_CARPETA", sync_carp)
+        os.environ["SYNC_CARPETA"] = sync_carp
+
+        sync_modo = request.form.get("sync_modo_cifrado", "auto").strip().lower()
+        if sync_modo in ["auto", "manual", "libre"]:
+            set_key(RUTA_ENV, "SYNC_MODO_CIFRADO", sync_modo)
+            os.environ["SYNC_MODO_CIFRADO"] = sync_modo
+
+        # Detección y Rotación Segura de Clave
+        clave_anterior = os.environ.get("SYNC_CLAVE", "").strip()
+        nueva_clave = request.form.get("sync_clave", "").strip()
+        clave_rotada = bool(nueva_clave and nueva_clave != clave_anterior)
+
+        if nueva_clave:
+            set_key(RUTA_ENV, "SYNC_CLAVE", nueva_clave)
+            os.environ["SYNC_CLAVE"] = nueva_clave
+
+        sync_auto = "true" if "sync_auto_aplicar" in request.form else "false"
+        set_key(RUTA_ENV, "SYNC_AUTO_APLICAR", sync_auto)
+        os.environ["SYNC_AUTO_APLICAR"] = sync_auto
+
+        sync_disp = request.form.get("sync_nombre_dispositivo", "").strip()
+        if sync_disp:
+            set_key(RUTA_ENV, "SYNC_NOMBRE_DISPOSITIVO", sync_disp)
+            os.environ["SYNC_NOMBRE_DISPOSITIVO"] = sync_disp
+
+# Si la clave cambió y la sincronización está activa, purgar y re-cifrar de inmediato
+        if clave_rotada and sync_hab == "true" and sync_carp and os.path.isdir(sync_carp):
+            registrar_log(f"Iniciando protocolo de rotación de llave en: {sync_carp}", "SYS")
+            
+            # 1. Purgado detallado de la bóveda anterior
+            archivos_a_purgar = ["pcm_vault.zip", "pcm_vault.meta", "pcm_vault.prev.zip", "pcm_vault.zip.tmp"]
+            for archivo_obsoleto in archivos_a_purgar:
+                ruta_obs = os.path.join(sync_carp, archivo_obsoleto)
+                if os.path.exists(ruta_obs):
+                    try:
+                        os.remove(ruta_obs)
+                        registrar_log(f"Bóveda obsoleta eliminada: {archivo_obsoleto}", "DELETE")
+                    except Exception as e:
+                        registrar_log(f"No se pudo eliminar {archivo_obsoleto}: {e}", "ERROR")
+
+            # 2. Generación de nueva versión re-cifrada
+            try:
+                rev_actual = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip()) + 1
+            except ValueError:
+                rev_actual = 1
+
+            db_path = getattr(database, "DB_PATH", "pcm.db")
+            clave_empaque = "" if sync_modo == "libre" else nueva_clave
+
+            registrar_log(f"Empaquetando pcm.db y adjuntos con nueva clave (Revisión #{rev_actual})...", "SYS")
+            exito, msg = sync_manager.exportar_boveda_cifrada(
+                carpeta_sync=sync_carp,
+                ruta_db=db_path,
+                carpeta_uploads=CARPETA_IMAGENES_DOCS,
+                clave_sync=clave_empaque,
+                nombre_equipo=sync_disp or "Dispositivo PCM",
+                revision_actual=rev_actual
+            )
+            if exito:
+                set_key(RUTA_ENV, "SYNC_ULTIMA_REVISION", str(rev_actual))
+                os.environ["SYNC_ULTIMA_REVISION"] = str(rev_actual)
+                registrar_log(f"Nueva bóveda publicada en la nube con éxito (Revisión #{rev_actual})", "SUCCESS")
+                flash(f"🔑 Clave rotada con éxito. La bóveda anterior fue eliminada y regenerada con el nuevo cifrado (Revisión #{rev_actual}). Copia la nueva clave en tus otros equipos.", "success")
+            else:
+                registrar_log(f"Fallo al re-cifrar la bóveda: {msg}", "ERROR")
+                flash(f"⚠ La clave se guardó pero falló el re-cifrado en la nube: {msg}", "error")
+
+        registrar_log("Ajustes del servidor y variables de sincronización .env actualizadas")
         return redirect(url_for("clips.configuracion", guardado=1))
 
     registrar_log("Panel de configuración y ajustes del sistema abierto")
@@ -868,6 +870,27 @@ def configuracion():
 
     valores = dotenv_values(RUTA_ENV)
 
+    # Estado de la bóveda de sincronización BYOC
+    carpeta_sync = valores.get("SYNC_CARPETA", "").strip()
+    meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync) if carpeta_sync else None
+    
+    try:
+        rev_local = int(valores.get("SYNC_ULTIMA_REVISION", "0").strip())
+    except ValueError:
+        rev_local = 0
+
+    rev_remota = int(meta_remoto.get("revision", 0)) if meta_remoto else 0
+    estado_sync = "desconectado"
+    if carpeta_sync and os.path.isdir(carpeta_sync):
+        if not meta_remoto:
+            estado_sync = "sin_boveda_remota"
+        elif rev_remota > rev_local:
+            estado_sync = "pendiente_descarga"
+        elif rev_local > rev_remota:
+            estado_sync = "adelantado_local"
+        else:
+            estado_sync = "al_dia"
+
     return render_template(
         "config.html",
         total_clips=total_clips,
@@ -879,14 +902,17 @@ def configuracion():
         cant_imagenes=cant_imagenes,
         valores=valores,
         desbloqueo_critico_activo=desbloqueado,
-        desbloqueo_segundos_restantes=segundos_restantes
+        desbloqueo_segundos_restantes=segundos_restantes,
+        meta_remoto=meta_remoto,
+        rev_local=rev_local,
+        rev_remota=rev_remota,
+        estado_sync=estado_sync
     )
 
 
 @clips_bp.route("/configuracion/desbloquear", methods=["POST"])
 @login_requerido
 def desbloquear_critico():
-    """Valida la MASTER_KEY para permitir cambios en puertos, credenciales o vaciado."""
     clave_ingresada = request.form.get("master_key", "").strip()
     if clave_ingresada and clave_ingresada == os.environ.get("MASTER_KEY"):
         session["desbloqueo_critico"] = True
@@ -902,7 +928,6 @@ def desbloquear_critico():
 @clips_bp.route("/configuracion/bloquear", methods=["POST"])
 @login_requerido
 def bloquear_critico():
-    """Cierra manualmente el acceso administrativo anticipando el vencimiento del timer."""
     session.pop("desbloqueo_critico", None)
     registrar_log("Configuración crítica bloqueada manualmente")
     return redirect(url_for("clips.configuracion"))
@@ -911,7 +936,6 @@ def bloquear_critico():
 @clips_bp.route("/configuracion/cerrar_sesiones", methods=["POST"])
 @login_requerido
 def cerrar_sesiones_globales():
-    """Fuerza el deslogueo en todos los navegadores regenerando la SECRET_KEY."""
     nueva_key = secrets.token_hex(32)
     set_key(RUTA_ENV, "SECRET_KEY", nueva_key)
     os.environ["SECRET_KEY"] = nueva_key
@@ -921,6 +945,10 @@ def cerrar_sesiones_globales():
     session.clear()
     return redirect(url_for("clips.login"))
 
+
+# ==============================================================================
+# SECCIÓN 10: EXPORTACIÓN, IMPORTACIÓN Y SINCRONIZACIÓN BYOC (E2EE)
+# ==============================================================================
 
 @clips_bp.route("/configuracion/exportar")
 @login_requerido
@@ -939,7 +967,7 @@ def exportar_backup():
     payload = {
         "metadata": {
             "sistema": "PCMPrivateClipManager",
-            "version_schema": "2.2",
+            "version_schema": VERSION,
             "generado_en": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "total_clips": len(clips),
             "total_documentos": len(docs)
@@ -979,7 +1007,7 @@ def exportar_backup():
 @clips_bp.route("/configuracion/importar", methods=["POST"])
 @login_requerido
 def importar_backup():
-    """Restaura una instantánea a partir de archivos .json o paquetes .zip."""
+    """Restaura una instantánea a partir de archivos .json o paquetes .zip sin mezclar tipos."""
     archivo = request.files.get("archivo_backup")
     if not archivo or archivo.filename == "":
         flash("No seleccionaste ningún archivo de respaldo.", "error")
@@ -1018,14 +1046,32 @@ def importar_backup():
         conn = database.obtener_conexion()
         cur = conn.cursor()
 
+        # Restauración de clips con preservación estricta de la columna 'tipo'
         for c in clips_a_restaurar:
+            tipo_clip = c.get("tipo")
+            # Autodetección resiliente para backups previos a la separación de esquemas
+            if not tipo_clip:
+                cat = c.get("categoria", "")
+                if cat.startswith("Codigo:"):
+                    tipo_clip = "codigo"
+                elif cat in CATEGORIAS_TEXTO_LARGO:
+                    tipo_clip = "nota"
+                else:
+                    tipo_clip = "clip"
+
             cur.execute("""
-                INSERT OR REPLACE INTO clips (uuid, titulo, contenido, categoria, fecha_creacion, expira_en, vistas_restantes, es_favorito)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO clips (uuid, titulo, contenido, categoria, tipo, fecha_creacion, expira_en, vistas_restantes, es_favorito)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                c["uuid"], c.get("titulo", ""), c["contenido"],
-                c.get("categoria", "General"), c.get("fecha_creacion", int(time.time())),
-                c.get("expira_en"), c.get("vistas_restantes", -1), c.get("es_favorito", 0)
+                c.get("uuid") or str(uuid.uuid4())[:8],
+                c.get("titulo", ""),
+                c.get("contenido", ""),
+                c.get("categoria", "General"),
+                tipo_clip,
+                c.get("fecha_creacion", int(time.time())),
+                c.get("expira_en"),
+                c.get("vistas_restantes", -1),
+                c.get("es_favorito", 0)
             ))
 
         for d in docs_a_restaurar:
@@ -1033,7 +1079,9 @@ def importar_backup():
                 INSERT OR REPLACE INTO documentos (id, titulo, contenido, creado_en, actualizado_en)
                 VALUES (?, ?, ?, ?, ?)
             """, (
-                d.get("id"), d.get("titulo", "Sin título"), d.get("contenido", ""),
+                d.get("id"),
+                d.get("titulo", "Sin título"),
+                d.get("contenido", ""),
                 d.get("creado_en", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
                 d.get("actualizado_en", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             ))
@@ -1041,19 +1089,159 @@ def importar_backup():
         conn.commit()
         conn.close()
 
-        registrar_log(f"Restauración exitosa: {len(clips_a_restaurar)} clips y {len(docs_a_restaurar)} documentos")
+        registrar_log(f"Restauración exitosa: {len(clips_a_restaurar)} elementos clasificados y {len(docs_a_restaurar)} documentos")
+        flash(f"Restauración completada con éxito: {len(clips_a_restaurar)} clips/notas/códigos y {len(docs_a_restaurar)} documentos.", "success")
         return redirect(url_for("clips.configuracion", guardado=1))
 
     except Exception as e:
-        registrar_log(f"Error crítico durante la restauración: {str(e)}")
+        registrar_log(f"Error crítico durante la restauración: {str(e)}", "ERROR")
         flash(f"Fallo al procesar el archivo de backup: {e}", "error")
         return redirect(url_for("clips.configuracion"))
+
+
+# ==============================================================================
+# SECCIÓN 11: ENDPOINTS DE SINCRONIZACIÓN BYOC (E2EE AES-256)
+# ==============================================================================
+
+@clips_bp.route("/configuracion/sync/subir", methods=["POST"])
+@login_requerido
+def sync_subir_boveda():
+    """Empaqueta y exporta la base de datos y adjuntos hacia la carpeta de nube configurada."""
+    carpeta_sync = os.environ.get("SYNC_CARPETA", "").strip()
+    if not carpeta_sync or not os.path.isdir(carpeta_sync):
+        flash("La carpeta de sincronización no está configurada o no es accesible.", "error")
+        return redirect(url_for("clips.configuracion"))
+    registrar_log(f"Iniciando empaquetado de bóveda hacia: {carpeta_sync}", "SYS")
+    try:
+        rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
+    except ValueError:
+        rev_local = 0
+
+    meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync)
+    if meta_remoto:
+        rev_remota = int(meta_remoto.get("revision", 0))
+        nueva_rev = max(rev_local, rev_remota) + 1
+    else:
+        nueva_rev = rev_local + 1
+
+    modo_cif = os.environ.get("SYNC_MODO_CIFRADO", "auto").strip().lower()
+    clave = "" if modo_cif == "libre" else os.environ.get("SYNC_CLAVE", "").strip()
+    nombre_disp = os.environ.get("SYNC_NOMBRE_DISPOSITIVO", "Dispositivo PCM").strip()
+    db_path = getattr(database, "DB_PATH", "pcm.db")
+    registrar_log(f"Empaquetando pcm.db y adjuntos con AES-256 (Revisión #{nueva_rev})...", "SYS")
+
+    exito, msg = sync_manager.exportar_boveda_cifrada(
+        carpeta_sync=carpeta_sync,
+        ruta_db=db_path,
+        carpeta_uploads=CARPETA_IMAGENES_DOCS,
+        clave_sync=clave,
+        nombre_equipo=nombre_disp,
+        revision_actual=nueva_rev
+    )
+
+    if exito:
+        set_key(RUTA_ENV, "SYNC_ULTIMA_REVISION", str(nueva_rev))
+        os.environ["SYNC_ULTIMA_REVISION"] = str(nueva_rev)
+        registrar_log(f"Bóveda sincronizada a la nube (Revisión #{nueva_rev})", "SYS")
+        flash(f"Bóveda subida exitosamente a la carpeta compartida (Revisión #{nueva_rev}).", "success")
+    else:
+        registrar_log(f"Fallo al sincronizar bóveda a la nube: {msg}", "ERROR")
+        flash(f"Error al exportar la bóveda: {msg}", "error")
+
+    return redirect(url_for("clips.configuracion"))
+
+
+@clips_bp.route("/configuracion/sync/descargar", methods=["POST"])
+@login_requerido
+def sync_descargar_boveda():
+    """Descarga, valida integridad criptográfica y restaura la bóveda desde la nube."""
+    carpeta_sync = os.environ.get("SYNC_CARPETA", "").strip()
+    if not carpeta_sync or not os.path.isdir(carpeta_sync):
+        flash("La carpeta de sincronización no está configurada o no es accesible.", "error")
+        return redirect(url_for("clips.configuracion"))
+
+    meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync)
+    if not meta_remoto:
+        flash("No se encontró ningún archivo de metadatos (.meta) en la carpeta de nube.", "error")
+        return redirect(url_for("clips.configuracion"))
+
+    modo_cif = os.environ.get("SYNC_MODO_CIFRADO", "auto").strip().lower()
+    clave = "" if modo_cif == "libre" else os.environ.get("SYNC_CLAVE", "").strip()
+    db_path = getattr(database, "DB_PATH", "pcm.db")
+    registrar_log(f"Validando integridad SHA-256 e importando bóveda desde: {carpeta_sync}", "SYS")
+
+    exito, msg = sync_manager.importar_boveda_cifrada(
+        carpeta_sync=carpeta_sync,
+        ruta_db_destino=db_path,
+        carpeta_uploads_destino=CARPETA_IMAGENES_DOCS,
+        clave_sync=clave
+    )
+
+    if exito:
+        rev_remota = str(meta_remoto.get("revision", 1))
+        set_key(RUTA_ENV, "SYNC_ULTIMA_REVISION", rev_remota)
+        os.environ["SYNC_ULTIMA_REVISION"] = rev_remota
+        registrar_log(f"Bóveda importada desde la nube: Revisión #{rev_remota}", "SYS")
+        flash(f"Bóveda restaurada con éxito: {msg}", "success")
+    else:
+        registrar_log(f"Fallo al restaurar bóveda desde la nube: {msg}", "ERROR")
+        flash(f"Error en la sincronización: {msg}", "error")
+
+    return redirect(url_for("clips.configuracion"))
+
+
+@clips_bp.route("/configuracion/sync/estado", methods=["GET"])
+@login_requerido
+def sync_consultar_estado():
+    """Endpoint JSON para sondeo dinámico y verificación de estado desde la UI."""
+    carpeta_sync = os.environ.get("SYNC_CARPETA", "").strip()
+    sync_habilitado = os.environ.get("SYNC_HABILITADO", "false").lower() == "true"
+
+    if not sync_habilitado or not carpeta_sync or not os.path.isdir(carpeta_sync):
+        return jsonify({
+            "habilitado": sync_habilitado,
+            "carpeta_valida": bool(carpeta_sync and os.path.isdir(carpeta_sync)),
+            "hay_boveda": False,
+            "estado": "desconectado"
+        })
+
+    meta = sync_manager.leer_metadatos_remotos(carpeta_sync)
+    try:
+        rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
+    except ValueError:
+        rev_local = 0
+
+    if not meta:
+        return jsonify({
+            "habilitado": True,
+            "carpeta_valida": True,
+            "hay_boveda": False,
+            "rev_local": rev_local,
+            "estado": "sin_boveda_remota"
+        })
+
+    rev_remota = int(meta.get("revision", 0))
+    estado = "al_dia"
+    if rev_remota > rev_local:
+        estado = "pendiente_descarga"
+    elif rev_local > rev_remota:
+        estado = "adelantado_local"
+
+    return jsonify({
+        "habilitado": True,
+        "carpeta_valida": True,
+        "hay_boveda": True,
+        "rev_local": rev_local,
+        "rev_remota": rev_remota,
+        "ultimo_equipo": meta.get("ultimo_equipo", "Desconocido"),
+        "timestamp": meta.get("timestamp", 0),
+        "estado": estado
+    })
 
 
 @clips_bp.route("/configuracion/borrar_todo", methods=["POST"])
 @login_requerido
 def borrar_todo():
-    """Vaciado integral de tablas relacionales bajo confirmación con MASTER_KEY."""
     if not esta_desbloqueado():
         return redirect(url_for("clips.configuracion"))
 
@@ -1069,10 +1257,6 @@ def borrar_todo():
 @clips_bp.route("/configuracion/purgar_imagenes", methods=["POST"])
 @login_requerido
 def purgar_imagenes_huerfanas():
-    """
-    Escanea la carpeta de subidas y elimina cualquier archivo gráfico
-    que ya no esté referenciado en el texto de ningún documento ni clip.
-    """
     conn = database.obtener_conexion()
     docs = conn.execute("SELECT contenido FROM documentos").fetchall()
     clips = conn.execute("SELECT contenido FROM clips").fetchall()
@@ -1104,3 +1288,80 @@ def purgar_imagenes_huerfanas():
         flash("El almacenamiento está optimizado: no se encontraron imágenes huérfanas.", "info")
 
     return redirect(url_for("clips.configuracion"))
+
+
+def seleccionar_carpeta_nativa():
+    """Abre el explorador de carpetas nativo del sistema operativo de forma resiliente."""
+    # 1. Intento nativo en Windows mediante PowerShell (no congela ni bloquea hilos)
+    if sys.platform == "win32":
+        try:
+            ps_script = (
+                "[System.Reflection.Assembly]::LoadWithPartialName('System.windows.forms') | Out-Null; "
+                "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                "$f.Description = 'Selecciona la carpeta base de tu Nube (MEGA, Drive, Dropbox, Pendrive...)'; "
+                "$f.ShowNewFolderButton = $true; "
+                "if ($f.ShowDialog() -eq 'OK') { Write-Output $f.SelectedPath }"
+            )
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
+            salida = res.stdout.strip()
+            if salida and os.path.isdir(salida):
+                return os.path.normpath(salida)
+        except Exception:
+            pass
+
+    # 2. Intento mediante Tkinter (multiplataforma)
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        ruta = filedialog.askdirectory(title="Selecciona la carpeta base de tu Nube")
+        root.destroy()
+        if ruta and os.path.isdir(ruta):
+            return os.path.normpath(ruta)
+    except Exception:
+        pass
+
+    # 3. Intento en Linux mediante Zenity
+    if sys.platform.startswith("linux"):
+        try:
+            res = subprocess.run(["zenity", "--file-selection", "--directory", "--title=Selecciona la carpeta de tu Nube"], capture_output=True, text=True)
+            salida = res.stdout.strip()
+            if salida and os.path.isdir(salida):
+                return os.path.normpath(salida)
+        except Exception:
+            pass
+
+    return None
+
+
+@clips_bp.route("/configuracion/sync/explorar_carpeta", methods=["POST"])
+@login_requerido
+def sync_explorar_carpeta():
+    """Abre el selector de carpetas del SO y genera automáticamente la subcarpeta PCM_Sync."""
+    if not esta_desbloqueado():
+        return jsonify({"ok": False, "error": "Debes desbloquear la configuración crítica con tu Master Key primero."}), 403
+
+    ruta_base = seleccionar_carpeta_nativa()
+    if not ruta_base:
+        return jsonify({"ok": False, "cancelado": True})
+
+    # Si el usuario eligió una carpeta base, anexamos automáticamente 'PCM_Sync' si no lo tiene
+    nombre_carpeta = os.path.basename(ruta_base.rstrip("/\\"))
+    if nombre_carpeta.lower() != "pcm_sync":
+        ruta_final = os.path.join(ruta_base, "PCM_Sync")
+    else:
+        ruta_final = ruta_base
+
+    try:
+        # El programa crea la carpeta físicamente si aún no existía
+        os.makedirs(ruta_final, exist_ok=True)
+        registrar_log(f"Carpeta de sincronización aprovisionada automáticamente: {ruta_final}", "SYS")
+        return jsonify({
+            "ok": True,
+            "ruta": ruta_final,
+            "creada": True
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"No se pudo crear la carpeta en la ruta seleccionada: {str(e)}"}), 500

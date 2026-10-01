@@ -8,17 +8,49 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+<style>
+    /* Ocultar la barra superior general para dar protagonismo a la tarjeta */
+    .app-header {
+        display: none !important;
+    }
+    
+    /* Centrado vertical equilibrado */
+    .auth-wrapper {
+        min-height: 82vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Animación y resplandor para el logo principal */
+    .login-hero-logo {
+        width: 76px;
+        height: 76px;
+        margin: 0 auto 12px auto;
+        display: block;
+        filter: drop-shadow(0 6px 16px rgba(56, 189, 248, 0.35));
+        transition: transform 0.3s ease;
+    }
+    .login-hero-logo:hover {
+        transform: scale(1.06) rotate(-2deg);
+    }
+</style>
 {% endblock %}
 
 {% block content %}
 <div class="auth-wrapper">
     <div class="auth-card">
         
-        <!-- CABECERA: IDENTIDAD DEL SISTEMA -->
-        <div class="auth-header">
-            <span class="auth-badge">PCM</span>
-            <h1 class="auth-title">PCMPrivateClipManager</h1>
-            <span class="auth-version">v{{ app_version }}</span>
+        <!-- CABECERA: IDENTIDAD DEL SISTEMA CON ÍCONO PROTAGÓNICO -->
+        <div class="auth-header" style="text-align: center; margin-bottom: 1.5rem;">
+            <img src="{{ url_for('static', filename='icon.svg') }}" alt="PCM Logo" class="login-hero-logo">
+            
+            <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 4px;">
+                <span class="auth-badge">PCM</span>
+                <h1 class="auth-title" style="margin: 0; font-size: 1.45rem;">PCMPrivateClipManager</h1>
+            </div>
+            
+            <span class="auth-version" style="opacity: 0.65; font-size: 0.85rem;">v{{ app_version }}</span>
         </div>
 
         <!-- AVISO DE PRIMER INICIO / CREDENCIALES GENERADAS -->
@@ -109,12 +141,6 @@
 
 {% block extra_js %}
 <script>
-/**
- * ==============================================================================
- * PCM PRIVATE CLIP MANAGER - CONTROLADOR DEL ACCESO (LOGIN.JS)
- * ==============================================================================
- */
-
 // Conmutar visibilidad de la contraseña en el campo de texto
 function togglePasswordVisibility() {
     const passInput = document.getElementById("inputPassword");

@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Fondo oscuro con profundidad -->
+    <radialGradient id="bgGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </radialGradient>
+    
+    <!-- Gradiente cian para el cuerpo del clip -->
+    <linearGradient id="clipCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+
+    <!-- Gradiente ámbar para el rayo de notas/velocidad -->
+    <linearGradient id="boltGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+
+    <!-- Resplandor sutil -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Superficie Squircle moderna -->
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#bgGlow)" stroke="#334155" stroke-width="6"/>
+
+  <!-- Líneas sutiles de documento/código en el fondo -->
+  <g opacity="0.18" stroke="#94a3b8" stroke-width="8" stroke-linecap="round">
+    <line x1="140" y1="130" x2="280" y2="130"/>
+    <line x1="140" y1="170" x2="230" y2="170"/>
+    <line x1="140" y1="360" x2="340" y2="360"/>
+    <line x1="140" y1="400" x2="270" y2="400"/>
+  </g>
+
+  <!-- Clip geométrico principal -->
+  <path d="M 310,210 
+           L 205,315 
+           A 42,42 0 0,1 145,255 
+           L 260,140 
+           A 64,64 0 0,1 350,230 
+           L 220,360 
+           A 86,86 0 0,1 98,238 
+           L 210,126" 
+        fill="none" 
+        stroke="url(#clipCyan)" 
+        stroke-width="32" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"
+        filter="url(#neonGlow)"/>
+
+  <!-- Rayo de velocidad / Chispa central -->
+  <polygon points="360,190 320,270 355,270 315,350 395,250 355,250" 
+           fill="url(#boltGold)" 
+           stroke="#090d16" 
+           stroke-width="6" 
+           stroke-linejoin="round"
+           filter="url(#neonGlow)"/>
+
+  <!-- Nodo de seguridad inferior -->
+  <circle cx="390" cy="385" r="14" fill="#38bdf8"/>
+  <circle cx="390" cy="385" r="7" fill="#090d16"/>
+</svg>

@@ -44,12 +44,18 @@ uploads/*
 !uploads/.gitkeep
 
 # ==========================================
-# RESPALDOS Y REGISTROS TEMPORALES
+# RESPALDOS, SINCRONIZACIÓN Y ESTADOS TEMPORALES
 # ==========================================
 backups/
 ultimo_backup.txt
 silenciar_backup.txt
+ultimo_sync.txt
+*.db.pre_sync
+*.pre_sync
 *.zip
+*.zip.tmp
+*.tmp
+pcm_vault.*
 pcm_backup_*.json
 
 # ==========================================

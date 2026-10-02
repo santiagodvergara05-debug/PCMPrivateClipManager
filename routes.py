@@ -1212,6 +1212,7 @@ def sync_consultar_estado():
         rev_local = 0
 
     if not meta:
+        registrar_log(f"Comprobación de nube: Carpeta activa sin bóveda remota (Local: #{rev_local})", "SYS")
         return jsonify({
             "habilitado": True,
             "carpeta_valida": True,
@@ -1221,11 +1222,14 @@ def sync_consultar_estado():
         })
 
     rev_remota = int(meta.get("revision", 0))
+    equipo_remoto = meta.get("ultimo_equipo", "Desconocido")
     estado = "al_dia"
     if rev_remota > rev_local:
         estado = "pendiente_descarga"
     elif rev_local > rev_remota:
         estado = "adelantado_local"
+
+    registrar_log(f"Comprobación de nube: Local #{rev_local} vs Nube #{rev_remota} [{equipo_remoto}] -> Estado: {estado}", "SYS")
 
     return jsonify({
         "habilitado": True,
@@ -1233,7 +1237,7 @@ def sync_consultar_estado():
         "hay_boveda": True,
         "rev_local": rev_local,
         "rev_remota": rev_remota,
-        "ultimo_equipo": meta.get("ultimo_equipo", "Desconocido"),
+        "ultimo_equipo": equipo_remoto,
         "timestamp": meta.get("timestamp", 0),
         "estado": estado
     })

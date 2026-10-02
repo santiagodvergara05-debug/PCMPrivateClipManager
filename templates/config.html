@@ -94,24 +94,26 @@
                     <span class="storage-icon">🏷️</span>
                     <div>
                         <strong>Revisión Local</strong>
-                        <p>#{{ rev_local }} ({{ valores.get('SYNC_NOMBRE_DISPOSITIVO', 'Este equipo') }})</p>
+                        <p id="syncRevLocalTexto">#{{ rev_local }} ({{ valores.get('SYNC_NOMBRE_DISPOSITIVO', 'Este equipo') }})</p>
                     </div>
                 </div>
 
                 <div class="storage-stat-pill">
-                    <span class="storage-icon">☁️</span>
+                    <span class="storage-icon">☁️️</span>
                     <div>
                         <strong>Revisión en la Nube</strong>
-                        {% if meta_remoto %}
-                            <p>#{{ rev_remota }} · De: <i>{{ meta_remoto.get('ultimo_equipo', 'Desconocido') }}</i></p>
-                        {% else %}
-                            <p>Sin bóveda en la carpeta</p>
-                        {% endif %}
+                        <p id="syncRevNubeTexto">
+                            {% if meta_remoto %}
+                                #{{ rev_remota }} · De: <i>{{ meta_remoto.get('ultimo_equipo', 'Desconocido') }}</i>
+                            {% else %}
+                                Sin bóveda en la carpeta
+                            {% endif %}
+                        </p>
                     </div>
                 </div>
 
                 <div class="storage-stat-pill">
-                    <span class="storage-icon">
+                    <span class="storage-icon" id="syncEstadoIcono">
                         {% if estado_sync == 'al_dia' %}✅
                         {% elif estado_sync == 'pendiente_descarga' %}📥
                         {% elif estado_sync == 'adelantado_local' %}📤
@@ -119,7 +121,7 @@
                     </span>
                     <div>
                         <strong>Estado del Vínculo</strong>
-                        <p>
+                        <p id="syncEstadoTexto">
                             {% if estado_sync == 'al_dia' %}Al día con la nube
                             {% elif estado_sync == 'pendiente_descarga' %}Actualización remota disponible
                             {% elif estado_sync == 'adelantado_local' %}Cambios locales por subir
@@ -130,17 +132,21 @@
                 </div>
             </div>
 
-            <!-- Botones de Acción Operativa -->
-            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                <form method="POST" action="{{ url_for('clips.sync_subir_boveda') }}" style="flex: 1;">
+            <!-- Botones de Acción Operativa con Botón de Comprobación -->
+            <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+                <button type="button" class="btn-config secondary" id="btnComprobarSync" onclick="comprobarEstadoNube()" style="flex: 1; min-width: 170px;">
+                    🔄 Comprobar Nube
+                </button>
+
+                <form method="POST" action="{{ url_for('clips.sync_subir_boveda') }}" style="flex: 1.5; min-width: 220px;">
                     <button type="submit" class="btn-config primary" style="width: 100%;">
                         📤 Subir Bóveda Cifrada a la Nube
                     </button>
                 </form>
 
-                <form method="POST" action="{{ url_for('clips.sync_descargar_boveda') }}" style="flex: 1;"
+                <form method="POST" action="{{ url_for('clips.sync_descargar_boveda') }}" style="flex: 1.5; min-width: 220px;"
                       onsubmit="return confirm('¿Descargar y aplicar la bóveda de la nube? Se respaldará tu base de datos local actual antes de reemplazarla.');">
-                    <button type="submit" class="btn-config secondary" style="width: 100%;"
+                    <button type="submit" id="btnDescargarSync" class="btn-config secondary" style="width: 100%;"
                             {% if estado_sync not in ['pendiente_descarga', 'al_dia'] %}disabled title="No hay bóveda remota para descargar"{% endif %}>
                         📥 Descargar y Aplicar Cambios
                     </button>
@@ -411,7 +417,7 @@
             </div>
 
             <div class="backup-subcard">
-                <h4 class="subcard-title">⬆️️ Restaurar Datos</h4>
+                <h4 class="subcard-title">⬆️ Restaurar Datos</h4>
                 <p class="subcard-desc">Carga tu archivo <code>.json</code> o <code>.zip</code>:</p>
 
                 <form method="POST" action="{{ url_for('clips.importar_backup') }}" enctype="multipart/form-data" id="form-restaurar">
@@ -700,16 +706,15 @@
         if (modo === 'auto') {
             inputClave.readOnly = true;
             inputClave.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+            inputClave.style.borderColor = '';
             inputClave.style.cursor = 'not-allowed';
             
-            // En modo automático el candado no es necesario y se habilita regenerar
             if (btnCandado) btnCandado.style.display = 'none';
             if (btnRegenerar) {
                 btnRegenerar.disabled = false;
                 btnRegenerar.title = "Generar nueva clave aleatoria segura de 256 bits";
             }
         } else {
-            // Modo manual: mostrar candado y deshabilitar regenerar
             if (btnRegenerar) {
                 btnRegenerar.disabled = true;
                 btnRegenerar.title = "Deshabilitado: Estás en modo de clave personalizada manual";
@@ -718,7 +723,6 @@
                 btnCandado.style.display = 'inline-block';
             }
             
-            // Si tiene contenido cargado previamente, lo dejamos fijado por seguridad
             if (inputClave.value.trim() !== "" && !candadoManualBloqueado) {
                 aplicarEstadoCandado(true);
             } else if (!candadoManualBloqueado) {
@@ -796,7 +800,77 @@
         setTimeout(() => { inputClave.style.boxShadow = ''; }, 1500);
     }
 
-    // 7. Control interactivo de Dropzone para respaldos manuales (.json y .zip)
+    // 7. Comprobación Asíncrona de Nube bajo demanda
+    async function comprobarEstadoNube() {
+        const btn = document.getElementById('btnComprobarSync');
+        const txtRevNube = document.getElementById('syncRevNubeTexto');
+        const txtRevLocal = document.getElementById('syncRevLocalTexto');
+        const txtEstado = document.getElementById('syncEstadoTexto');
+        const iconEstado = document.getElementById('syncEstadoIcono');
+        const btnDescargar = document.getElementById('btnDescargarSync');
+
+        if (!btn) return;
+
+        const textoOriginal = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Comprobando...';
+
+        try {
+            const resp = await fetch("{{ url_for('clips.sync_consultar_estado') }}", {
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            });
+            const data = await resp.json();
+
+            if (!data.habilitado || !data.carpeta_valida) {
+                if (txtEstado) txtEstado.textContent = 'Carpeta no accesible o desactivada';
+                if (iconEstado) iconEstado.textContent = '⚠️';
+                btn.innerHTML = '⚠ Desconectado';
+            } else if (!data.hay_boveda) {
+                if (txtRevNube) txtRevNube.textContent = 'Sin bóveda en la carpeta';
+                if (txtEstado) txtEstado.textContent = 'Carpeta lista para primera subida';
+                if (iconEstado) iconEstado.textContent = '⚠️';
+                if (btnDescargar) btnDescargar.disabled = true;
+                btn.innerHTML = '✔ Comprobado';
+            } else {
+                if (txtRevNube) {
+                    txtRevNube.innerHTML = `#${data.rev_remota} · De: <i>${data.ultimo_equipo}</i>`;
+                }
+
+                if (data.estado === 'al_dia') {
+                    if (txtEstado) txtEstado.textContent = 'Al día con la nube';
+                    if (iconEstado) iconEstado.textContent = '✅';
+                    if (btnDescargar) {
+                        btnDescargar.disabled = false;
+                        btnDescargar.classList.remove('warning');
+                        btnDescargar.classList.add('secondary');
+                    }
+                    btn.innerHTML = '✔ ¡Al día!';
+                } else if (data.estado === 'pendiente_descarga') {
+                    if (txtEstado) txtEstado.textContent = `Actualización remota disponible (#${data.rev_remota})`;
+                    if (iconEstado) iconEstado.textContent = '📥';
+                    if (btnDescargar) {
+                        btnDescargar.disabled = false;
+                        btnDescargar.classList.remove('secondary');
+                        btnDescargar.classList.add('warning');
+                    }
+                    btn.innerHTML = '📥 ¡Hay cambios!';
+                } else if (data.estado === 'adelantado_local') {
+                    if (txtEstado) txtEstado.textContent = 'Cambios locales por subir';
+                    if (iconEstado) iconEstado.textContent = '📤';
+                    btn.innerHTML = '📤 Local adelantado';
+                }
+            }
+        } catch (e) {
+            btn.innerHTML = '❌ Error de red';
+        } finally {
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = textoOriginal;
+            }, 2000);
+        }
+    }
+
+    // 8. Control interactivo de Dropzone para respaldos manuales (.json y .zip)
     const inputBackup = document.getElementById('inputArchivoBackup');
     const dropzone = document.getElementById('dropzoneBackup');
     const dropzoneIcon = document.getElementById('dropzoneIcon');
@@ -839,7 +913,7 @@
         });
     }
 
-    // Inicializar estados visuales al cargar
+    // Inicializar estados visuales al cargar la página
     document.addEventListener("DOMContentLoaded", () => {
         alternarCamposSync();
         inicializarModoClave();

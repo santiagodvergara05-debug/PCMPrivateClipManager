@@ -364,3 +364,89 @@ button, input, select, textarea {
 code, pre, kbd, samp {
     font-family: var(--font-mono);
 }
+
+/* ==========================================================================
+   INDICADOR GLOBAL DE CAMBIOS PENDIENTES DE SINCRONIZACIÓN
+   ========================================================================== */
+.sync-alert-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: rgba(243, 156, 18, 0.12);
+    border: 1px solid rgba(243, 156, 18, 0.45);
+    color: #f39c12;
+    padding: 0.35rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    vertical-align: middle;
+}
+
+.sync-alert-badge:hover {
+    background: rgba(243, 156, 18, 0.25);
+    border-color: #f39c12;
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(243, 156, 18, 0.4);
+    transform: translateY(-1px);
+}
+
+.sync-alert-icon {
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
+}
+
+/* Punto titilante / pulsante de advertencia */
+.sync-alert-dot {
+    width: 7px;
+    height: 7px;
+    background-color: #f39c12;
+    border-radius: 50%;
+    display: inline-block;
+    animation: syncPulso 1.8s infinite ease-in-out;
+}
+
+@keyframes syncPulso {
+    0% {
+        transform: scale(0.9);
+        box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.7);
+    }
+    70% {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 6px rgba(243, 156, 18, 0);
+    }
+    100% {
+        transform: scale(0.9);
+        box-shadow: 0 0 0 0 rgba(243, 156, 18, 0);
+    }
+}
+
+/* Tooltip emergente enriquecido */
+.sync-alert-badge[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: -34px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e222b;
+    color: #ecf0f1;
+    border: 1px solid #2d3139;
+    padding: 0.35rem 0.7rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+}
+
+.sync-alert-badge:hover[data-tooltip]::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(2px);
+}

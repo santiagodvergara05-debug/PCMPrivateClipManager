@@ -55,6 +55,7 @@ DURACION_DESBLOQUEO = 120  # 2 minutos
 
 RUTA_ENV = ".env"
 RUTA_ULTIMO_BACKUP = "ultimo_backup.txt"
+RUTA_ULTIMO_SYNC = "ultimo_sync.txt"
 
 CATEGORIAS_TEXTO_LARGO = ("Nota", "Borrador", "Resumen", "Apuntes", "Texto Plano", "Novelas", "Prompt")
 CARPETA_IMAGENES_DOCS = os.path.join("static", "uploads", "documentos")
@@ -167,8 +168,31 @@ def formatear_tamano(bytes_cant):
 
 @clips_bp.app_context_processor
 def inyectar_contexto():
+    """Inyecta variables globales y el estado de sincronización en todos los templates."""
+    sync_hab = os.environ.get("SYNC_HABILITADO", "false").lower() == "true"
+    sync_carp = os.environ.get("SYNC_CARPETA", "").strip()
+    cambios_pendientes = False
+
+    if sync_hab and sync_carp and os.path.isdir(sync_carp):
+        ultimo_sync_ts = 0.0
+        if os.path.exists(RUTA_ULTIMO_SYNC):
+            try:
+                with open(RUTA_ULTIMO_SYNC, "r", encoding="utf-8") as f:
+                    ultimo_sync_ts = float(f.read().strip())
+            except Exception:
+                ultimo_sync_ts = 0.0
+
+        db_path = getattr(database, "DB_PATH", "pcm.db")
+        if os.path.exists(db_path):
+            db_mtime = os.path.getmtime(db_path)
+            # Si la base de datos se modificó después del último sync (margen de 1.5s)
+            if db_mtime > (ultimo_sync_ts + 1.5):
+                cambios_pendientes = True
+
     return {
-        "app_version": VERSION
+        "app_version": VERSION,
+        "sync_hab": sync_hab,
+        "sync_pendiente": cambios_pendientes
     }
 
 
@@ -798,6 +822,18 @@ def configuracion():
             set_key(RUTA_ENV, "SYNC_NOMBRE_DISPOSITIVO", sync_disp)
             os.environ["SYNC_NOMBRE_DISPOSITIVO"] = sync_disp
 
+        rev_form = request.form.get("sync_ultima_revision", "").strip()
+        if rev_form.isdigit():
+            # Comprobamos si la carpeta de nube ya tiene una bóveda activa
+            meta_nube = sync_manager.leer_metadatos_remotos(sync_carp) if sync_carp and os.path.isdir(sync_carp) else None
+            if not meta_nube:
+                set_key(RUTA_ENV, "SYNC_ULTIMA_REVISION", rev_form)
+                os.environ["SYNC_ULTIMA_REVISION"] = rev_form
+                registrar_log(f"Contador de revisión local fijado a: #{rev_form}", "SYS")
+            else:
+                # Si la nube ya tiene una bóveda, se descarta el cambio manual para proteger la cadena
+                registrar_log("Intento de cambio de revisión ignorado: existe una bóveda activa en la nube", "WARN")
+
 # Si la clave cambió y la sincronización está activa, purgar y re-cifrar de inmediato
         if clave_rotada and sync_hab == "true" and sync_carp and os.path.isdir(sync_carp):
             registrar_log(f"Iniciando protocolo de rotación de llave en: {sync_carp}", "SYS")
@@ -1111,7 +1147,9 @@ def sync_subir_boveda():
     if not carpeta_sync or not os.path.isdir(carpeta_sync):
         flash("La carpeta de sincronización no está configurada o no es accesible.", "error")
         return redirect(url_for("clips.configuracion"))
+
     registrar_log(f"Iniciando empaquetado de bóveda hacia: {carpeta_sync}", "SYS")
+
     try:
         rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
     except ValueError:
@@ -1120,7 +1158,20 @@ def sync_subir_boveda():
     meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync)
     if meta_remoto:
         rev_remota = int(meta_remoto.get("revision", 0))
-        nueva_rev = max(rev_local, rev_remota) + 1
+        
+        # 🛡️ BLINDAJE ANTI-SOBREESCRITURA Y CONFLICTOS
+        if rev_remota > rev_local:
+            equipo_nube = meta_remoto.get("ultimo_equipo", "otro dispositivo")
+            registrar_log(f"Subida rechazada: Conflicto detectado (Local #{rev_local} < Nube #{rev_remota} de {equipo_nube})", "WARN")
+            flash(
+                f"⛔ Subida bloqueada por seguridad: La nube tiene una versión más reciente "
+                f"(#{rev_remota} subida por '{equipo_nube}'). Debes 'Descargar y Aplicar Cambios' "
+                f"antes de poder subir datos nuevos.", 
+                "error"
+            )
+            return redirect(url_for("clips.configuracion"))
+
+        nueva_rev = rev_local + 1
     else:
         nueva_rev = rev_local + 1
 
@@ -1128,8 +1179,8 @@ def sync_subir_boveda():
     clave = "" if modo_cif == "libre" else os.environ.get("SYNC_CLAVE", "").strip()
     nombre_disp = os.environ.get("SYNC_NOMBRE_DISPOSITIVO", "Dispositivo PCM").strip()
     db_path = getattr(database, "DB_PATH", "pcm.db")
-    registrar_log(f"Empaquetando pcm.db y adjuntos con AES-256 (Revisión #{nueva_rev})...", "SYS")
 
+    registrar_log(f"Empaquetando pcm.db y adjuntos con AES-256 (Revisión #{nueva_rev})...", "SYS")
     exito, msg = sync_manager.exportar_boveda_cifrada(
         carpeta_sync=carpeta_sync,
         ruta_db=db_path,
@@ -1140,6 +1191,8 @@ def sync_subir_boveda():
     )
 
     if exito:
+        with open(RUTA_ULTIMO_SYNC, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
         set_key(RUTA_ENV, "SYNC_ULTIMA_REVISION", str(nueva_rev))
         os.environ["SYNC_ULTIMA_REVISION"] = str(nueva_rev)
         registrar_log(f"Bóveda sincronizada a la nube (Revisión #{nueva_rev})", "SYS")
@@ -1168,6 +1221,7 @@ def sync_descargar_boveda():
     modo_cif = os.environ.get("SYNC_MODO_CIFRADO", "auto").strip().lower()
     clave = "" if modo_cif == "libre" else os.environ.get("SYNC_CLAVE", "").strip()
     db_path = getattr(database, "DB_PATH", "pcm.db")
+
     registrar_log(f"Validando integridad SHA-256 e importando bóveda desde: {carpeta_sync}", "SYS")
 
     exito, msg = sync_manager.importar_boveda_cifrada(
@@ -1178,6 +1232,8 @@ def sync_descargar_boveda():
     )
 
     if exito:
+        with open(RUTA_ULTIMO_SYNC, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
         rev_remota = str(meta_remoto.get("revision", 1))
         set_key(RUTA_ENV, "SYNC_ULTIMA_REVISION", rev_remota)
         os.environ["SYNC_ULTIMA_REVISION"] = rev_remota

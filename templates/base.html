@@ -17,13 +17,28 @@
         <!-- Cabecera en dos niveles centrados -->
         <header class="app-header">
             <div class="header-inner">
-                <!-- Nivel 1: Identidad y Título centrado con Ícono Oficial -->
-                <div class="header-brand-row">
+                <!-- Nivel 1: Identidad, Título centrado e Indicador de Sincronización -->
+                <div class="header-brand-row" style="display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;">
                     <a href="{{ url_for('clips.index') }}" class="brand-logo" style="display: inline-flex; align-items: center; gap: 8px; text-decoration: none;">
                         <img src="{{ url_for('static', filename='icon.svg') }}" alt="PCM Logo" style="width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;">
                         <span class="badge-app">PCM</span>
                         <span class="brand-title">PCMPrivateClipManager</span>
                     </a>
+
+                    <!-- ALERTA DE SINCRONIZACIÓN PENDIENTE (Solo se muestra si hay cambios sin subir) -->
+                    {% if session.get('autenticado') and sync_pendiente %}
+                    <a href="{{ url_for('clips.configuracion') }}" 
+                       class="sync-alert-badge" 
+                       data-tooltip="Nuevos datos detectados. Clic para sincronizar en la nube">
+                        <svg class="sync-alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/>
+                            <path d="M12 12v9"/>
+                            <path d="m16 16-4-4-4 4"/>
+                        </svg>
+                        <span>Sincronizar</span>
+                        <span class="sync-alert-dot"></span>
+                    </a>
+                    {% endif %}
                 </div>
 
                 <!-- Nivel 2: Barra de funciones y secciones centrada -->

@@ -59,7 +59,7 @@
                       placeholder="Escribe aquí tu plantilla, directiva de sistema o prefijo recurrente. Se conserva guardado localmente de forma persistente." 
                       spellcheck="false"></textarea>
             <div class="card-statusbar">
-                <span id="statsFijo">0 pal. · 0 car.</span>
+                <span id="statsFijo">0 pal. · 0 car. · ~0 tokens</span>
                 <span class="save-indicator">💾 Guardado local</span>
             </div>
         </section>
@@ -79,7 +79,7 @@
                       placeholder="Pega o escribe aquí los datos variables o la consulta. Se fusionará automáticamente al instante con el texto fijo. Es volátil (se vacía al recargar)." 
                       spellcheck="false" autofocus></textarea>
             <div class="card-statusbar">
-                <span id="statsEntrada">0 pal. · 0 car.</span>
+                <span id="statsEntrada">0 pal. · 0 car. · ~0 tokens</span>
                 <span class="entry-hint">Al pegar aquí se fusiona al instante</span>
             </div>
         </section>
@@ -105,7 +105,7 @@
         <textarea id="textoResultado" class="fusion-textarea result-textarea" readonly 
                   placeholder="El texto combinado aparecerá aquí automáticamente..."></textarea>
         <div class="card-statusbar">
-            <span id="statsResultado">Total: 0 palabras · 0 caracteres</span>
+            <span id="statsResultado">Total: 0 palabras · 0 caracteres · ~0 tokens</span>
             <div id="toastFeedback" class="toast-feedback" style="display: none;">
                 ✓ ¡Copiado automático al portapapeles!
             </div>
@@ -133,7 +133,7 @@
             </div>
 
             <div class="fusion-modal-footer">
-                <span id="statsModalResultado">Total: 0 palabras · 0 caracteres</span>
+                <span id="statsModalResultado">Total: 0 palabras · 0 caracteres · ~0 tokens</span>
             </div>
         </div>
     </div>
@@ -150,7 +150,7 @@
  * Responsabilidades:
  * 1. Gestión reactiva de concatenación de búferes de texto (Fijo + Variable).
  * 2. Persistencia automática del texto base en LocalStorage.
- * 3. Telemetría de palabras y caracteres en tiempo real.
+ * 3. Telemetría de palabras, caracteres y tokens aproximados (CJK + Código + Prosa).
  * 4. Intercepción de portapapeles universal con disparo automático (Auto-copy).
  * 5. Visor modal ampliado con bloqueo seguro de scroll vertical.
  * ==============================================================================
@@ -201,16 +201,41 @@ checkAutoCopiar.addEventListener("change", () => {
 });
 
 /* ==============================================================================
-   SECCIÓN 3: CÓMPUTO DE MÉTRICAS TIPOGRÁFICAS
+   SECCIÓN 3: CÓMPUTO DE MÉTRICAS TIPOGRÁFICAS & TOKENS HÍBRIDOS (CJK / CÓDIGO)
    ============================================================================== */
 /**
- * Calcula palabras y caracteres de una cadena de texto dada.
- * Maneja cadenas vacías sin contar falsas palabras iniciales.
+ * Estima tokens con ponderación diferenciada para alfabetos occidentales,
+ * bloques de código fuente y caracteres de Asia Oriental (Chino, Japonés, Coreano).
+ * 
+ * Rangos Unicode cubiertos:
+ * - \u4e00-\u9fa5 : Ideogramas CJK unificados (Kanji / Hanzi / Hanja)
+ * - \u3040-\u30ff : Hiragana y Katakana japoneses
+ * - \uac00-\ud7af : Sílabas Hangul coreanas
+ */
+function estimarTokens(txt) {
+    if (!txt || txt.trim().length === 0) return 0;
+
+    const patronCJK = /[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g;
+    const coincidenciasCJK = txt.match(patronCJK);
+    const cantCJK = coincidenciasCJK ? coincidenciasCJK.length : 0;
+
+    const textoRestante = txt.replace(patronCJK, "");
+    const cantRestante = textoRestante.length;
+
+    // Ponderación: 1 ideograma CJK consume ~1.3 tokens en tokenizadores BPE/SentencePiece.
+    // Código y texto occidental consumen ~1 token cada 3.5 caracteres (considerando sangrías y símbolos).
+    const tokensEstimados = (cantCJK * 1.3) + (cantRestante / 3.5);
+    return Math.ceil(tokensEstimados);
+}
+
+/**
+ * Calcula palabras, caracteres y tokens aproximados de una cadena de texto.
  */
 function obtenerMetricas(txt) {
     const palabras = txt.trim() === "" ? 0 : txt.trim().split(/\s+/).length;
     const caracteres = txt.length;
-    return { palabras, caracteres };
+    const tokens = estimarTokens(txt);
+    return { palabras, caracteres, tokens };
 }
 
 /* ==============================================================================
@@ -250,15 +275,15 @@ function actualizarFusion(permitirAutoCopiado = true) {
 
     // Actualizar métricas del panel fijo
     const mFijo = obtenerMetricas(textoFijo.value);
-    statsFijo.textContent = `${mFijo.palabras} pal. · ${mFijo.caracteres} car.`;
+    statsFijo.textContent = `${mFijo.palabras} pal. · ${mFijo.caracteres} car. · ~${mFijo.tokens} tokens`;
 
     // Actualizar métricas del panel dinámico
     const mEntrada = obtenerMetricas(textoEntrada.value);
-    statsEntrada.textContent = `${mEntrada.palabras} pal. · ${mEntrada.caracteres} car.`;
+    statsEntrada.textContent = `${mEntrada.palabras} pal. · ${mEntrada.caracteres} car. · ~${mEntrada.tokens} tokens`;
 
     // Actualizar métricas de salida combinada
     const mRes = obtenerMetricas(resultado);
-    const textoStats = `Total: ${mRes.palabras} palabras · ${mRes.caracteres} caracteres`;
+    const textoStats = `Total: ${mRes.palabras} palabras · ${mRes.caracteres} caracteres · ~${mRes.tokens} tokens`;
     statsResultado.textContent = textoStats;
     if (statsModalResultado) {
         statsModalResultado.textContent = textoStats;
@@ -276,7 +301,6 @@ selectSeparador.addEventListener("change", () => actualizarFusion(false));
 
 textoEntrada.addEventListener("input", () => actualizarFusion(true));
 textoEntrada.addEventListener("paste", () => {
-    // Micro-pausa para permitir que el navegador vuelque el portapapeles en el textarea
     setTimeout(() => actualizarFusion(true), 20);
 });
 
@@ -305,7 +329,6 @@ function copiarAlPortapapelesDirecto(txt) {
         return;
     }
 
-    // Fallback estándar en navegadores compatibles
     const aux = document.createElement("textarea");
     aux.value = txt;
     aux.setAttribute("readonly", "");
@@ -354,7 +377,6 @@ function abrirModalExpandir() {
     statsModalResultado.textContent = statsResultado.textContent;
     modalExpandir.style.display = "flex";
     
-    // Bloquear scroll del fondo
     document.body.style.overflow = "hidden";
     
     setTimeout(() => {
@@ -367,14 +389,12 @@ function cerrarModalExpandir() {
     document.body.style.overflow = "";
 }
 
-// Cierre mediante tecla Escape
 window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && modalExpandir.style.display === "flex") {
         cerrarModalExpandir();
     }
 });
 
-// Cierre al pulsar sobre el fondo oscuro exterior
 modalExpandir.addEventListener("click", (e) => {
     if (e.target.id === "modalExpandirFusion") {
         cerrarModalExpandir();

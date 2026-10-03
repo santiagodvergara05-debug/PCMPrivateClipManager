@@ -87,6 +87,46 @@
             Sincroniza tu base de datos y archivos multimedia a través de tu nube personal (MEGA, Google Drive, OneDrive o pendrive) sin intermediarios ni servidores de terceros.
         </p>
 
+        <!-- BANNER 1: METADATOS EN NUBE CORRUPTOS (.meta) -->
+        <div class="alert-error" id="bannerMetaCorrupto"
+             {% if estado_sync != 'meta_corrupto' %}
+             style="display: none; margin-bottom: 1.2rem; border-left: 4px solid #ff5252; background: rgba(255, 82, 82, 0.12); padding: 0.9rem 1.1rem; border-radius: 6px;"
+             {% else %}
+             style="margin-bottom: 1.2rem; border-left: 4px solid #ff5252; background: rgba(255, 82, 82, 0.12); padding: 0.9rem 1.1rem; border-radius: 6px;"
+             {% endif %}>
+            <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+                <span style="font-size: 1.4rem; line-height: 1;">❌</span>
+                <div>
+                    <strong style="color: #ff5252; font-size: 0.95rem;">¡Alerta de Integridad en la Nube!</strong>
+                    <p style="margin: 0.3rem 0 0; font-size: 0.88rem; color: #e0e0e0; line-height: 1.45;">
+                        Se detectó un archivo <code>pcm_vault.meta</code> dañado, vacío o con formato inválido en tu carpeta compartida.
+                        Las subidas y descargas automáticas han sido <strong>bloqueadas por seguridad</strong> para evitar sobrescribir datos válidos. 
+                        Revisa la carpeta o vacíala si deseas recomenzar una nueva cadena de sincronización.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- BANNER 2: PAQUETE ZIP EN NUBE CORRUPTO O INCOMPLETO (Firma SHA-256) -->
+        <div class="alert-error" id="bannerZipCorrupto"
+             {% if estado_sync != 'zip_corrupto' %}
+             style="display: none; margin-bottom: 1.2rem; border-left: 4px solid #f39c12; background: rgba(243, 156, 18, 0.12); padding: 0.9rem 1.1rem; border-radius: 6px;"
+             {% else %}
+             style="margin-bottom: 1.2rem; border-left: 4px solid #f39c12; background: rgba(243, 156, 18, 0.12); padding: 0.9rem 1.1rem; border-radius: 6px;"
+             {% endif %}>
+            <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+                <span style="font-size: 1.4rem; line-height: 1;">⚠️</span>
+                <div>
+                    <strong style="color: #f39c12; font-size: 0.95rem;">¡Paquete Remoto Incompleto o Corrupto!</strong>
+                    <p style="margin: 0.3rem 0 0; font-size: 0.88rem; color: #e0e0e0; line-height: 1.45;">
+                        El archivo <code>pcm_vault.zip</code> en tu carpeta remota no coincide con la firma criptográfica SHA-256 esperada.
+                        Es probable que OneDrive o Google Drive aún lo estén subiendo, o que el archivo se haya truncado.
+                        La descarga ha sido <strong>bloqueada para evitar corromper tu base de datos local</strong>.
+                    </p>
+                </div>
+            </div>
+        </div>
+
         {% if valores.get('SYNC_HABILITADO', 'false')|lower == 'true' and valores.get('SYNC_CARPETA') %}
             <!-- Panel de Estado de Bóveda -->
             <div class="storage-stats-container" style="margin-bottom: 1.2rem;">
@@ -99,12 +139,17 @@
                 </div>
 
                 <div class="storage-stat-pill">
-                    <span class="storage-icon">☁️️</span>
+                    <span class="storage-icon">☁</span>
                     <div>
                         <strong>Revisión en la Nube</strong>
                         <p id="syncRevNubeTexto">
-                            {% if meta_remoto %}
+                            {% if estado_sync == 'meta_corrupto' %}
+                                <span style="color: #ff5252; font-weight: bold;">❌ Metadatos dañados (.meta)</span>
+                            {% elif meta_remoto %}
                                 #{{ rev_remota }} · De: <i>{{ meta_remoto.get('ultimo_equipo', 'Desconocido') }}</i>
+                                {% if estado_sync == 'zip_corrupto' %}
+                                    <span style="color: #f39c12; font-size: 0.8rem; display: block;">⚠️ Archivo ZIP dañado</span>
+                                {% endif %}
                             {% else %}
                                 Sin bóveda en la carpeta
                             {% endif %}
@@ -114,7 +159,9 @@
 
                 <div class="storage-stat-pill">
                     <span class="storage-icon" id="syncEstadoIcono">
-                        {% if estado_sync == 'al_dia' %}✅
+                        {% if estado_sync == 'meta_corrupto' %}❌
+                        {% elif estado_sync == 'zip_corrupto' %}⚠️
+                        {% elif estado_sync == 'al_dia' %}✅
                         {% elif estado_sync == 'pendiente_descarga' %}📥
                         {% elif estado_sync == 'adelantado_local' %}📤
                         {% else %}⚠️{% endif %}
@@ -122,7 +169,9 @@
                     <div>
                         <strong>Estado del Vínculo</strong>
                         <p id="syncEstadoTexto">
-                            {% if estado_sync == 'al_dia' %}Al día con la nube
+                            {% if estado_sync == 'meta_corrupto' %}<span style="color: #ff5252; font-weight: 600;">Bóveda remota corrupta / ilegible</span>
+                            {% elif estado_sync == 'zip_corrupto' %}<span style="color: #f39c12; font-weight: 600;">⚠️ Paquete remoto incompleto o corrupto</span>
+                            {% elif estado_sync == 'al_dia' %}Al día con la nube
                             {% elif estado_sync == 'pendiente_descarga' %}Actualización remota disponible
                             {% elif estado_sync == 'adelantado_local' %}Cambios locales por subir
                             {% elif estado_sync == 'sin_boveda_remota' %}Carpeta lista para primera subida
@@ -140,10 +189,10 @@
 
                 <form method="POST" action="{{ url_for('clips.sync_subir_boveda') }}" style="flex: 1.5; min-width: 220px;">
                     <button type="submit" id="btnSubirBovedaTop" class="btn-config primary" style="width: 100%;"
-                            {% if estado_sync == 'pendiente_descarga' %}
+                            {% if estado_sync in ['pendiente_descarga', 'meta_corrupto', 'zip_corrupto'] %}
                                 disabled 
                                 style="width: 100%; opacity: 0.35; cursor: not-allowed; filter: grayscale(100%);"
-                                title="Subida bloqueada por seguridad: primero debes descargar la versión más reciente de la nube"
+                                title="{% if estado_sync == 'meta_corrupto' %}Subida bloqueada por seguridad: metadatos en la nube dañados{% elif estado_sync == 'zip_corrupto' %}Subida bloqueada por seguridad: paquete remoto en la nube dañado o incompleto{% else %}Subida bloqueada por seguridad: primero debes descargar la versión más reciente de la nube{% endif %}"
                             {% endif %}>
                         📤 Subir Bóveda Cifrada a la Nube
                     </button>
@@ -152,7 +201,10 @@
                 <form method="POST" action="{{ url_for('clips.sync_descargar_boveda') }}" style="flex: 1.5; min-width: 220px;"
                       onsubmit="return confirm('¿Descargar y aplicar la bóveda de la nube? Se respaldará tu base de datos local actual antes de reemplazarla.');">
                     <button type="submit" id="btnDescargarSync" class="btn-config secondary" style="width: 100%;"
-                            {% if estado_sync not in ['pendiente_descarga', 'al_dia'] %}disabled title="No hay bóveda remota para descargar"{% endif %}>
+                            {% if estado_sync not in ['pendiente_descarga', 'al_dia'] or estado_sync == 'zip_corrupto' %}
+                                disabled 
+                                title="{% if estado_sync == 'zip_corrupto' %}Descarga bloqueada: firma SHA-256 no coincide o archivo incompleto{% elif estado_sync == 'meta_corrupto' %}Descarga bloqueada: archivo .meta corrupto{% else %}No hay bóveda remota para descargar{% endif %}"
+                            {% endif %}>
                         📥 Descargar y Aplicar Cambios
                     </button>
                 </form>
@@ -270,7 +322,6 @@
 
                 <!-- CONTENEDOR DE CAMPOS DEPENDIENTES -->
                 <div id="contenedorSyncCampos" class="sync-subfields">
-                    <!-- SELECTOR AUTOMATIZADO CON BOTÓN EXAMINAR -->
                     <div class="field-item">
                         <label>Carpeta local de sincronización (Nube / Pendrive):</label>
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -299,6 +350,10 @@
                                 <span style="color: #e67e22; font-size: 0.82rem; font-weight: normal; margin-left: 0.5rem;">
                                     🔒 Bloqueado (Vinculado a bóveda remota activa #{% if rev_remota is defined %}{{ rev_remota }}{% else %}0{% endif %})
                                 </span>
+                            {% elif estado_sync == 'meta_corrupto' %}
+                                <span style="color: #ff5252; font-size: 0.82rem; font-weight: normal; margin-left: 0.5rem;">
+                                    🔒 Bloqueado (Archivo .meta remoto corrupto presente)
+                                </span>
                             {% else %}
                                 <span style="color: #2ecc71; font-size: 0.82rem; font-weight: normal; margin-left: 0.5rem;">
                                     🔓 Editable (Carpeta limpia, puedes definir o reiniciar el contador)
@@ -309,13 +364,13 @@
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
                             <input type="number" name="sync_ultima_revision" id="inputSyncRevision" 
                                    value="{{ valores.get('SYNC_ULTIMA_REVISION', '0') }}" min="0" class="input-corto"
-                                   {% if meta_remoto %}
+                                   {% if meta_remoto or estado_sync == 'meta_corrupto' %}
                                        readonly 
                                        style="background: rgba(255, 255, 255, 0.05); cursor: not-allowed;" 
-                                       title="No se puede modificar mientras exista una bóveda activa en la nube."
+                                       title="No se puede modificar mientras exista una bóveda o archivo .meta en la nube."
                                    {% endif %}>
 
-                            {% if not meta_remoto %}
+                            {% if not meta_remoto and estado_sync != 'meta_corrupto' %}
                                 <button type="button" class="btn-config secondary" onclick="document.getElementById('inputSyncRevision').value = '0'" 
                                         style="white-space: nowrap; padding: 0.6rem 0.9rem;" title="Reiniciar contador a 0">
                                     🔄 Resetear a #0
@@ -326,6 +381,8 @@
                         <small style="opacity: 0.75; display: block; margin-top: 0.35rem;">
                             {% if meta_remoto %}
                                 ℹ️ <strong>Bóveda detectada:</strong> En la nube está activa la <strong>Revisión #{{ rev_remota }}</strong> subida por <i>{{ meta_remoto.get('ultimo_equipo', 'otro dispositivo') }}</i>. Para reiniciar el contador a #0, vacía o elimina los archivos <code>pcm_vault.*</code> de tu carpeta de nube.
+                            {% elif estado_sync == 'meta_corrupto' %}
+                                ⚠️ <strong>Metadatos dañados:</strong> Elimina manualmente el archivo <code>pcm_vault.meta</code> dañado de la carpeta compartida si deseas comenzar un contador nuevo.
                             {% else %}
                                 ℹ️ <strong>Carpeta lista:</strong> No se detectó ninguna bóveda previa en la nube. Puedes elegir el número de revisión base o dejarlo en 0.
                             {% endif %}
@@ -354,7 +411,6 @@
                             </span>
                         </label>
                         
-                        <!-- Caja Informativa de Vinculación entre Dispositivos -->
                         <div style="background: rgba(100, 108, 255, 0.08); border-left: 3px solid #646cff; padding: 0.6rem 0.85rem; border-radius: 4px; margin-bottom: 0.8rem; font-size: 0.84rem; color: #c9d1d9; line-height: 1.45;">
                             💡 <strong>¿Vinculando un segundo equipo (ej. Notebook)?</strong> Selecciona <em>✏️ Clave Personalizada Manual</em>, pega aquí la clave exacta generada en tu equipo principal y presiona <em>🔒 Bloquear</em> para protegerla de cambios accidentales.
                         </div>
@@ -378,7 +434,6 @@
                                 📋 Copiar
                             </button>
 
-                            <!-- Candado de protección contra modificaciones accidentales -->
                             <button type="button" class="btn-config secondary" id="btnCandadoManual" onclick="toggleCandadoManual()" title="Bloquear edición accidental" style="display: none; white-space: nowrap; padding: 0.6rem 0.9rem;">
                                 🔒 Bloquear
                             </button>
@@ -507,9 +562,7 @@
     </section>
 </main>
 
-<!-- ================================================================= -->
-<!-- VENTANA MODAL: ARQUITECTURA DEL SISTEMA Y REGLAS BYOC -->
-<!-- ================================================================= -->
+<!-- VENTANAS MODALES -->
 <div id="modalSyncHelp" class="modal-overlay" onclick="cerrarModalSync(event)">
     <div class="modal-content" onclick="event.stopPropagation()">
         <div class="modal-header">
@@ -518,56 +571,15 @@
         </div>
         <div class="modal-body">
             <p>
-                <strong>PCMPrivateClipManager</strong> opera bajo el principio estricto de <strong>Zero-Knowledge Encryption</strong>. El sistema no depende de intermediarios, APIs propietarias ni servidores de terceros. Los datos se empaquetan y cifran localmente con el algoritmo militar <strong>AES-256</strong> mediante <code>pyzipper</code>, permitiendo que utilices cualquier proveedor de almacenamiento como canal de transporte seguro.
+                <strong>PCMPrivateClipManager</strong> opera bajo el principio estricto de <strong>Zero-Knowledge Encryption</strong>. El sistema no depende de intermediarios, APIs propietarias ni servidores de terceros. Los datos se empaquetan y cifran localmente con el algoritmo <strong>AES-256</strong> mediante <code>pyzipper</code>, permitiendo utilizar cualquier nube como canal de transporte seguro.
             </p>
-
-            <h4>🛡️ Protocolo y Reglas de Oro de Sincronización:</h4>
+            <h4>🛡️ Reglas de Oro de Sincronización:</h4>
             <ul style="padding-left: 1.2rem; margin-top: 0.3rem;">
-                <li style="margin-bottom: 0.5rem;">
-                    <strong>Protección Anti-Atraso (Blind Overwrite Prevention):</strong> Si tu equipo detecta que en la nube existe una versión más reciente (ej. Revisión #12 vs Local #10), el botón de subida se inhabilitará automáticamente. Esto impide que cambios desactualizados sobreescriban el trabajo nuevo. Siempre debes descargar primero.
-                </li>
-                <li style="margin-bottom: 0.5rem;">
-                    <strong>Control de Reseteo a Revisión #0:</strong> El contador de revisiones no puede reiniciarse a voluntad mientras la nube contenga una bóveda activa, ya que rompería la cadena cronológica de tus otros equipos. La opción de editar o resetear a #0 solo se desbloquea si la carpeta de la nube se encuentra limpia y vacía.
-                </li>
-                <li style="margin-bottom: 0.5rem;">
-                    <strong>Protocolo de Rotación de Llaves (N + 1):</strong> Al regenerar una clave de cifrado, la bóveda anterior es purgada y el nuevo paquete se compila con la revisión inmediatamente siguiente ($N + 1$). Esto garantiza que todos tus nodos reconozcan el cambio y soliciten la nueva clave antes de sincronizar.
-                </li>
-                <li style="margin-bottom: 0.5rem;">
-                    <strong>Extracción Atómica y Verificación SHA-256:</strong> Antes de reemplazar tu base de datos local (<code>pcm.db</code>), el sistema valida la firma criptográfica SHA-256 estipulada en <code>pcm_vault.meta</code>. Si la descarga estuviera incompleta o la clave fuera errónea, la operación se aborta sin alterar tus datos existentes.
-                </li>
+                <li style="margin-bottom: 0.5rem;"><strong>Protección Anti-Atraso:</strong> Si en la nube hay una versión más reciente, la subida queda bloqueada. Debes descargar primero.</li>
+                <li style="margin-bottom: 0.5rem;"><strong>Control de Reseteo a Revisión #0:</strong> El contador no puede reiniciarse a voluntad mientras la nube contenga una bóveda activa o metadatos presentes.</li>
+                <li style="margin-bottom: 0.5rem;"><strong>Rotación de Llaves:</strong> Al regenerar una clave, la bóveda anterior es purgada y el nuevo paquete se compila con la revisión siguiente.</li>
+                <li style="margin-bottom: 0.5rem;"><strong>Extracción Atómica y Verificación SHA-256:</strong> Antes de reemplazar tu base de datos local, el sistema valida la firma criptográfica.</li>
             </ul>
-
-            <h4>📁 Rutas y Ejemplos de Configuración por Servicio:</h4>
-
-            <div class="cloud-provider-card">
-                <strong>🟦 Microsoft OneDrive</strong>
-                <p>Selecciona tu carpeta personal y PCM creará automáticamente la subcarpeta:</p>
-                <code>C:\Users\TuUsuario\OneDrive\PCM_Sync</code>
-            </div>
-
-            <div class="cloud-provider-card">
-                <strong>🔴 MEGAsync</strong>
-                <p>Selecciona tu directorio raíz sincronizado de MEGA:</p>
-                <code>C:\Users\TuUsuario\MEGAsync\PCM_Sync</code>
-            </div>
-
-            <div class="cloud-provider-card">
-                <strong>🔵 Google Drive (App de escritorio)</strong>
-                <p>Apunta hacia la unidad virtual asignada:</p>
-                <code>G:\Mi unidad\PCM_Sync</code>
-            </div>
-
-            <div class="cloud-provider-card">
-                <strong>📦 Dropbox</strong>
-                <p>Selecciona tu carpeta local de Dropbox:</p>
-                <code>C:\Users\TuUsuario\Dropbox\PCM_Sync</code>
-            </div>
-
-            <div class="cloud-provider-card">
-                <strong>⚡ Syncthing / Pendrive USB / Red LAN Compartida</strong>
-                <p>Compatible con cualquier volumen accesible en el sistema operativo:</p>
-                <code>E:\PCM_Sync</code> o <code>\\ServidorLocal\Compartido\PCM_Sync</code>
-            </div>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn-config primary" onclick="cerrarModalSync()">Entendido</button>
@@ -575,7 +587,6 @@
     </div>
 </div>
 
-<!-- MODAL PROPIO DE CONFIRMACIÓN DE ROTACIÓN DE LLAVE -->
 <div id="modalConfirmRotacion" class="modal-overlay" onclick="cerrarModalRotacion(event)">
     <div class="modal-content modal-sm" onclick="event.stopPropagation()">
         <div class="modal-header">
@@ -584,13 +595,10 @@
         </div>
         <div class="modal-body">
             <p>Se generará una <strong>nueva clave aleatoria de 256 bits</strong> con máxima entropía.</p>
-            <p style="margin-top: 0.8rem;">
-                Al guardar cambios:
-            </p>
             <ol style="padding-left: 1.2rem; margin: 0.5rem 0; font-size: 0.88rem; line-height: 1.5;">
                 <li>La bóveda anterior en la nube se eliminará de forma segura.</li>
                 <li>Se compilará una nueva bóveda re-cifrada con esta nueva llave.</li>
-                <li>Deberás copiar la nueva clave en tu notebook para mantener la sincronización.</li>
+                <li>Deberás copiar la nueva clave en tus demás equipos para mantener la sincronización.</li>
             </ol>
         </div>
         <div class="modal-confirm-actions">
@@ -603,23 +611,18 @@
 
 {% block extra_js %}
 <script>
-    // 1. Contador regresivo en tiempo real con recarga inmediata a prueba de throttling
+    // 1. Contador regresivo en tiempo real
     const elementoTexto = document.getElementById("texto-contador");
     if (elementoTexto) {
         const segundosIniciales = parseInt(elementoTexto.dataset.segundos || "0", 10);
-        
         if (segundosIniciales <= 0) {
             window.location.href = window.location.origin + window.location.pathname;
         } else {
-            // Marca temporal absoluta para evitar que el estrangulamiento de segundo plano retrase el bloqueo
             const tiempoFinalMs = Date.now() + (segundosIniciales * 1000);
-
             function refrescarContador() {
                 const msRestantes = tiempoFinalMs - Date.now();
                 const segTotales = Math.ceil(msRestantes / 1000);
-
                 if (segTotales <= 0) {
-                    // Recarga instantánea y limpia al expirar el tiempo
                     window.location.href = window.location.origin + window.location.pathname;
                 } else {
                     const min = Math.floor(segTotales / 60);
@@ -627,24 +630,18 @@
                     elementoTexto.textContent = `${min} min ${seg < 10 ? '0' : ''}${seg} seg`;
                 }
             }
-
-            const intervaloReloj = setInterval(refrescarContador, 1000);
-
-            // Verificación inmediata al volver a la pestaña tras cambiar de ventana
+            setInterval(refrescarContador, 1000);
             document.addEventListener("visibilitychange", () => {
-                if (!document.hidden) {
-                    refrescarContador();
-                }
+                if (!document.hidden) refrescarContador();
             });
         }
     }
 
-    // 2. Control de Atenuación y Bloqueo de Campos de Sincronización
+    // 2. Control de Campos de Sincronización
     function alternarCamposSync() {
         const check = document.getElementById('checkSyncHabilitado');
         const contenedor = document.getElementById('contenedorSyncCampos');
         if (!check || !contenedor) return;
-
         if (check.checked) {
             contenedor.classList.remove('deshabilitado');
             contenedor.querySelectorAll('input, select, button').forEach(el => el.removeAttribute('tabindex'));
@@ -655,13 +652,12 @@
         }
     }
 
-    // 3. Control de Modo de Cifrado (Bloqueo si es 'libre')
+    // 3. Control de Modo de Cifrado
     function alternarModoCifrado() {
         const selectModo = document.getElementById('selectSyncModoCifrado');
         const bloqueClave = document.getElementById('bloqueClaveSync');
         const badgeLibre = document.getElementById('badgeModoLibre');
         if (!selectModo || !bloqueClave) return;
-
         if (selectModo.value === 'libre') {
             bloqueClave.classList.add('deshabilitado');
             if (badgeLibre) badgeLibre.style.display = 'inline';
@@ -670,19 +666,18 @@
             bloqueClave.classList.remove('deshabilitado');
             if (badgeLibre) badgeLibre.style.display = 'none';
             bloqueClave.querySelectorAll('input, button').forEach(el => el.removeAttribute('tabindex'));
-            
             const radioAuto = document.getElementById('radioClaveAuto');
             cambiarModoClave(radioAuto && radioAuto.checked ? 'auto' : 'manual');
         }
     }
 
-    // 4. Ventana Modal Informativa BYOC & Arquitectura
+    // 4. Modales
     function abrirModalSync() {
         const modal = document.getElementById("modalSyncHelp");
         if (modal) modal.classList.add("active");
     }
 
-    function cerrarModalSync(e) {
+    function cerrarModalSync() {
         const modal = document.getElementById("modalSyncHelp");
         if (modal) modal.classList.remove("active");
     }
@@ -694,24 +689,21 @@
         }
     });
 
-    // 5. Explorador Nativo Automatizado de Carpetas
+    // 5. Selector nativo de carpetas
     async function explorarCarpetaSync() {
         const btn = document.getElementById('btnExaminarSync');
         const input = document.getElementById('inputSyncCarpeta');
         const feedback = document.getElementById('syncCarpetaFeedback');
-
         if (!btn || !input) return;
 
         btn.disabled = true;
         btn.textContent = '⏳ Abriendo explorador...';
-
         try {
             const resp = await fetch("{{ url_for('clips.sync_explorar_carpeta') }}", {
                 method: "POST",
                 headers: { "X-Requested-With": "XMLHttpRequest" }
             });
             const data = await resp.json();
-
             if (data.ok && data.ruta) {
                 input.value = data.ruta;
                 if (feedback) {
@@ -729,7 +721,7 @@
         }
     }
 
-    // 6. Gestión Inteligente de Clave Criptográfica & Candado
+    // 6. Claves criptográficas y candados
     const inputClave = document.getElementById('inputSyncClave');
     const radioAuto = document.getElementById('radioClaveAuto');
     const radioManual = document.getElementById('radioClaveManual');
@@ -761,7 +753,6 @@
             inputClave.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
             inputClave.style.borderColor = '';
             inputClave.style.cursor = 'not-allowed';
-            
             if (btnCandado) btnCandado.style.display = 'none';
             if (btnRegenerar) {
                 btnRegenerar.disabled = false;
@@ -770,12 +761,9 @@
         } else {
             if (btnRegenerar) {
                 btnRegenerar.disabled = true;
-                btnRegenerar.title = "Deshabilitado: Estás en modo de clave personalizada manual";
+                btnRegenerar.title = "Deshabilitado: Estás en modo manual";
             }
-            if (btnCandado) {
-                btnCandado.style.display = 'inline-block';
-            }
-            
+            if (btnCandado) btnCandado.style.display = 'inline-block';
             if (inputClave.value.trim() !== "" && !candadoManualBloqueado) {
                 aplicarEstadoCandado(true);
             } else if (!candadoManualBloqueado) {
@@ -792,14 +780,12 @@
     function aplicarEstadoCandado(bloquear) {
         candadoManualBloqueado = bloquear;
         if (!inputClave || !btnCandado) return;
-
         if (bloquear) {
             inputClave.readOnly = true;
             inputClave.style.backgroundColor = 'rgba(46, 204, 113, 0.08)';
             inputClave.style.borderColor = '#2ecc71';
             inputClave.style.cursor = 'not-allowed';
             btnCandado.innerHTML = '🔓 Desbloquear';
-            btnCandado.title = "Desbloquear clave para realizar correcciones";
             btnCandado.classList.remove('warning');
             btnCandado.classList.add('secondary');
         } else {
@@ -808,7 +794,6 @@
             inputClave.style.borderColor = '';
             inputClave.style.cursor = 'text';
             btnCandado.innerHTML = '🔒 Bloquear';
-            btnCandado.title = "Fijar clave para evitar modificaciones accidentales";
             btnCandado.classList.remove('secondary');
             btnCandado.classList.add('warning');
             inputClave.focus();
@@ -844,24 +829,23 @@
         const arreglo = new Uint8Array(32);
         crypto.getRandomValues(arreglo);
         const nuevaHex = Array.from(arreglo, b => b.toString(16).padStart(2, '0')).join('');
-
         inputClave.value = nuevaHex;
         radioAuto.checked = true;
         cambiarModoClave('auto');
-
         inputClave.style.boxShadow = '0 0 10px rgba(46, 204, 113, 0.8)';
         setTimeout(() => { inputClave.style.boxShadow = ''; }, 1500);
     }
 
-    // 7. Comprobación Asíncrona de Nube & Protección Anti-Atraso en tiempo real
+    // 7. Comprobación Asíncrona de Nube & Protección Anti-Atraso
     async function comprobarEstadoNube() {
         const btn = document.getElementById('btnComprobarSync');
         const txtRevNube = document.getElementById('syncRevNubeTexto');
-        const txtRevLocal = document.getElementById('syncRevLocalTexto');
         const txtEstado = document.getElementById('syncEstadoTexto');
         const iconEstado = document.getElementById('syncEstadoIcono');
         const btnDescargar = document.getElementById('btnDescargarSync');
         const btnSubirTop = document.getElementById('btnSubirBovedaTop');
+        const bannerCorrupto = document.getElementById('bannerMetaCorrupto');
+        const bannerZipCorrupto = document.getElementById('bannerZipCorrupto');
 
         if (!btn) return;
 
@@ -877,15 +861,37 @@
 
             if (!data.habilitado || !data.carpeta_valida) {
                 if (txtEstado) txtEstado.textContent = 'Carpeta no accesible o desactivada';
-                if (iconEstado) iconEstado.textContent = '⚠️';
+                if (iconEstado) iconEstado.textContent = '⚠️️';
+                if (bannerCorrupto) bannerCorrupto.style.display = 'none';
+                if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'none';
                 btn.innerHTML = '⚠ Desconectado';
+            } else if (data.meta_corrupto || data.estado === 'meta_corrupto') {
+                if (bannerCorrupto) bannerCorrupto.style.display = 'block';
+                if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'none';
+                if (txtRevNube) txtRevNube.innerHTML = '<span style="color: #ff5252; font-weight: bold;">❌ Metadatos dañados (.meta)</span>';
+                if (txtEstado) txtEstado.innerHTML = '<span style="color: #ff5252; font-weight: 600;">Bóveda remota corrupta / ilegible</span>';
+                if (iconEstado) iconEstado.textContent = '❌';
+
+                if (btnSubirTop) {
+                    btnSubirTop.disabled = true;
+                    btnSubirTop.style.opacity = '0.35';
+                    btnSubirTop.style.cursor = 'not-allowed';
+                    btnSubirTop.style.filter = 'grayscale(100%)';
+                    btnSubirTop.title = 'Subida bloqueada por seguridad: metadatos remotos corruptos';
+                }
+                if (btnDescargar) {
+                    btnDescargar.disabled = true;
+                    btnDescargar.title = 'Descarga bloqueada: archivo .meta corrupto';
+                }
+                btn.innerHTML = '❌ Nube dañada';
             } else if (!data.hay_boveda) {
+                if (bannerCorrupto) bannerCorrupto.style.display = 'none';
+                if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'none';
                 if (txtRevNube) txtRevNube.textContent = 'Sin bóveda en la carpeta';
                 if (txtEstado) txtEstado.textContent = 'Carpeta lista para primera subida';
                 if (iconEstado) iconEstado.textContent = '⚠️';
                 if (btnDescargar) btnDescargar.disabled = true;
-                
-                // Permitir subida si la carpeta está limpia
+
                 if (btnSubirTop) {
                     btnSubirTop.disabled = false;
                     btnSubirTop.style.opacity = '1';
@@ -895,11 +901,11 @@
                 }
                 btn.innerHTML = '✔ Comprobado';
             } else {
-                if (txtRevNube) {
-                    txtRevNube.innerHTML = `#${data.rev_remota} · De: <i>${data.ultimo_equipo}</i>`;
-                }
+                if (bannerCorrupto) bannerCorrupto.style.display = 'none';
+                if (txtRevNube) txtRevNube.innerHTML = `#${data.rev_remota} · De: <i>${data.ultimo_equipo}</i>`;
 
                 if (data.estado === 'al_dia') {
+                    if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'none';
                     if (txtEstado) txtEstado.textContent = 'Al día con la nube';
                     if (iconEstado) iconEstado.textContent = '✅';
                     if (btnDescargar) {
@@ -916,25 +922,42 @@
                     }
                     btn.innerHTML = '✔ ¡Al día!';
                 } else if (data.estado === 'pendiente_descarga') {
+                    if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'none';
                     if (txtEstado) txtEstado.textContent = `Actualización remota disponible (#${data.rev_remota})`;
                     if (iconEstado) iconEstado.textContent = '📥';
-                    
-                    // Bloqueo Anti-Atraso dinámico del botón de subida
+
                     if (btnSubirTop) {
                         btnSubirTop.disabled = true;
                         btnSubirTop.style.opacity = '0.35';
                         btnSubirTop.style.cursor = 'not-allowed';
                         btnSubirTop.style.filter = 'grayscale(100%)';
-                        btnSubirTop.title = 'Subida bloqueada: primero debes descargar la versión más reciente de la nube';
+                        btnSubirTop.title = 'Subida bloqueada: primero debes descargar la versión más reciente';
                     }
-
                     if (btnDescargar) {
                         btnDescargar.disabled = false;
                         btnDescargar.classList.remove('secondary');
                         btnDescargar.classList.add('warning');
                     }
                     btn.innerHTML = '📥 ¡Hay cambios!';
+                } else if (data.estado === 'zip_corrupto') {
+                    if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'block';
+                    if (txtEstado) txtEstado.innerHTML = '<span style="color: #f39c12; font-weight: 600;">⚠️ Paquete remoto incompleto o corrupto (Firma SHA-256 no coincide)</span>';
+                    if (iconEstado) iconEstado.textContent = '⚠️';
+
+                    if (btnDescargar) {
+                        btnDescargar.disabled = true;
+                        btnDescargar.title = 'Descarga bloqueada: el archivo pcm_vault.zip en la nube no coincide con su hash SHA-256';
+                    }
+                    if (btnSubirTop) {
+                        btnSubirTop.disabled = true;
+                        btnSubirTop.style.opacity = '0.35';
+                        btnSubirTop.style.cursor = 'not-allowed';
+                        btnSubirTop.style.filter = 'grayscale(100%)';
+                        btnSubirTop.title = 'Subida bloqueada por seguridad: paquete remoto en la nube dañado o incompleto';
+                    }
+                    btn.innerHTML = '⚠️ ZIP corrupto';
                 } else if (data.estado === 'adelantado_local') {
+                    if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'none';
                     if (txtEstado) txtEstado.textContent = 'Cambios locales por subir';
                     if (iconEstado) iconEstado.textContent = '📤';
                     if (btnSubirTop) {
@@ -957,7 +980,7 @@
         }
     }
 
-    // 8. Control interactivo de Dropzone para respaldos manuales (.json y .zip)
+    // 8. Dropzone para respaldos manuales
     const inputBackup = document.getElementById('inputArchivoBackup');
     const dropzone = document.getElementById('dropzoneBackup');
     const dropzoneIcon = document.getElementById('dropzoneIcon');
@@ -966,7 +989,6 @@
 
     function actualizarDropzoneConArchivo(file) {
         if (!file) return;
-        
         const esZip = file.name.toLowerCase().endsWith(".zip");
         dropzoneIcon.textContent = esZip ? "📦" : "📄";
         dropzoneText.innerHTML = `Listo para restaurar: <strong>${file.name}</strong> <br><small>(${(file.size / 1024).toFixed(1)} KB)</small>`;
@@ -980,16 +1002,13 @@
                 actualizarDropzoneConArchivo(this.files[0]);
             }
         });
-
         dropzone.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropzone.classList.add('drag-active');
         });
-
         dropzone.addEventListener('dragleave', () => {
             dropzone.classList.remove('drag-active');
         });
-
         dropzone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropzone.classList.remove('drag-active');
@@ -1000,7 +1019,6 @@
         });
     }
 
-    // Inicializar estados visuales al cargar la página
     document.addEventListener("DOMContentLoaded", () => {
         alternarCamposSync();
         inicializarModoClave();

@@ -7,10 +7,11 @@ Punto de entrada principal del sistema. Responsabilidades:
 2. Inicialización de la aplicación Flask y definición de límites globales (250 MiB).
 3. Telemetría de arranque estilo init/kernel de Linux con formateo ANSI.
 4. Motor de autorreparación, sanitización y serialización segura del archivo .env.
-5. Auditoría de integridad estructural y concurrencia de la base de datos SQLite.
-6. Aprovisionamiento, saneamiento de directorios y purga de archivos huérfanos.
-7. Comprobación y sincronización de bóvedas cifradas BYOC (E2EE AES-256).
-8. Resolución dinámica de interfaz local/LAN y puesta en marcha del servidor.
+5. Saneamiento del sistema de archivos, purga de huérfanos y aislamiento WAL.
+6. Auditoría exhaustiva de integridad SQLite (Magic Header, Tablas y Esquema).
+7. Protocolo de Disaster Recovery y Rescate Automático desde Bóvedas BYOC.
+8. Auditoría cruzada de sincronización condicionada al modo operativo.
+9. Resolución dinámica de interfaz local/LAN y puesta en marcha del servidor WSGI.
 ==============================================================================
 """
 
@@ -27,6 +28,7 @@ import sqlite3
 import shutil
 import webbrowser
 import threading
+import hashlib
 from datetime import datetime
 
 # Componentes del framework web y variables de entorno
@@ -37,7 +39,7 @@ from logger_http import configurar_logger_http
 # Módulos internos de la arquitectura PCM
 import database
 import sync_manager
-from routes import clips_bp, RUTA_ULTIMO_BACKUP
+from routes import clips_bp, RUTA_ULTIMO_BACKUP, RUTA_ULTIMO_SYNC
 from version import VERSION
 
 # Detección de empaquetado PyInstaller (sys.frozen = True cuando es un binario .exe)
@@ -97,9 +99,9 @@ def error_archivo_demasiado_grande(e):
 
 
 # ==============================================================================
-# SECCIÓN 3: MOTOR DE TELEMETRÍA Y LOGS ESTILO INIT / KERNEL
+# SECCIÓN 3: MOTOR DE TELEMETRÍA Y UTILIDADES DE INTEGRIDAD
 # ==============================================================================
-def klog(estado, mensaje, delay=0.10):
+def klog(estado, mensaje, delay=0.07):
     prefijos = {
         "ok":   "  [\033[92m  OK  \033[0m] ",
         "info": "  [\033[94m INFO \033[0m] ",
@@ -113,6 +115,20 @@ def klog(estado, mensaje, delay=0.10):
     print(f"{prefijo}{mensaje}")
     if delay > 0:
         time.sleep(delay)
+
+
+def calcular_sha256_local(ruta):
+    """Calcula el hash SHA-256 en bloques de 64 KB de forma segura."""
+    if not os.path.exists(ruta):
+        return None
+    try:
+        h = hashlib.sha256()
+        with open(ruta, "rb") as f:
+            for bloque in iter(lambda: f.read(65536), b""):
+                h.update(bloque)
+        return h.hexdigest()
+    except Exception:
+        return None
 
 
 # ==============================================================================
@@ -132,7 +148,7 @@ VALORES_PREDETERMINADOS = {
     # Módulo de Sincronización BYOC (E2EE)
     "SYNC_HABILITADO": "false",
     "SYNC_CARPETA": "",
-    "SYNC_MODO_CIFRADO": "auto",  # 'auto', 'manual' o 'libre'
+    "SYNC_MODO_CIFRADO": "auto",  # 'auto' o 'libre'
     "SYNC_CLAVE": lambda: secrets.token_hex(32),
     "SYNC_AUTO_APLICAR": "true",
     "SYNC_NOMBRE_DISPOSITIVO": lambda: socket.gethostname(),
@@ -161,12 +177,17 @@ def sanitizar_y_reparar_env(ruta_env):
     valores = {}
     archivo_danado = False
     env_existia = os.path.exists(ruta_env)
+    
+    ya_inicializado = os.path.exists(DB_PATH)
 
     if env_existia:
         try:
             with open(ruta_env, "r", encoding="utf-8") as f:
-                f.read()
-            valores = dict(dotenv_values(ruta_env))
+                contenido_raw = f.read()
+                if "\x00" in contenido_raw:
+                    archivo_danado = True
+                else:
+                    valores = dict(dotenv_values(ruta_env))
         except Exception:
             archivo_danado = True
 
@@ -184,7 +205,7 @@ def sanitizar_y_reparar_env(ruta_env):
         valores = {}
     else:
         flag_env = str(valores.get("SISTEMA_INICIALIZADO", "")).strip("'\"").lower() == "true"
-        ya_inicializado = flag_env or os.path.exists(DB_PATH)
+        ya_inicializado = flag_env or ya_inicializado
 
     hubo_cambios = archivo_danado or (not env_existia)
     faltantes = []
@@ -199,7 +220,6 @@ def sanitizar_y_reparar_env(ruta_env):
     for clave, valor_default in VALORES_PREDETERMINADOS.items():
         val = valores.get(clave)
 
-        # SYNC_CARPETA puede estar vacía legítimamente si aún no se configuró ruta
         if clave == "SYNC_CARPETA":
             if val is None:
                 valores[clave] = ""
@@ -242,15 +262,18 @@ def sanitizar_y_reparar_env(ruta_env):
 
 
 # ==============================================================================
-# SECCIÓN 5: AUDITORÍA AVANZADA DE INTEGRIDAD SQLITE (BLINDADA)
+# SECCIÓN 5: AUDITORÍA AVANZADA DE INTEGRIDAD SQLITE (BLINDADA CONTRA CAOS)
 # ==============================================================================
 def auditar_integridad_db(db_path):
     if not os.path.exists(db_path):
         return "ausente", 0, 0, 0, 0
 
+    if os.path.getsize(db_path) == 0:
+        return "ausente", 0, 0, 0, 0
+
     conn = None
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=3.0)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
@@ -261,7 +284,7 @@ def auditar_integridad_db(db_path):
 
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('clips', 'documentos');")
         tablas = [r["name"] for r in cur.fetchall()]
-        if "clips" not in tablas:
+        if "clips" not in tablas or "documentos" not in tablas:
             return "incompleta", 0, 0, 0, 0
 
         try:
@@ -290,16 +313,22 @@ def auditar_integridad_db(db_path):
             return "bloqueada", 0, 0, 0, 0
         return "corrupta", 0, 0, 0, 0
 
+    except (sqlite3.DatabaseError, sqlite3.Error):
+        return "corrupta", 0, 0, 0, 0
+
     except Exception:
-        return "ok", 0, 0, 0, 0
+        return "corrupta", 0, 0, 0, 0
 
     finally:
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 # ==============================================================================
-# SECCIÓN 6: SANEAMIENTO DEL SISTEMA DE ARCHIVOS Y PURGA
+# SECCIÓN 6: SANEAMIENTO DEL SISTEMA DE ARCHIVOS Y PURGA DE TEMPORALES
 # ==============================================================================
 def sanear_directorios_y_archivos(ya_inicializado=False):
     directorios = [
@@ -333,6 +362,17 @@ def sanear_directorios_y_archivos(ya_inicializado=False):
         if purgados > 0:
             klog("warn", f"Saneamiento: {purgados} archivo(s) huérfano(s) de 0 bytes eliminados de uploads.")
 
+    purgados_sync = 0
+    for elemento in os.listdir(DIRECTORIO_RAIZ):
+        if elemento.endswith((".pre_sync", ".zip.tmp", ".db.tmp")):
+            try:
+                os.remove(os.path.join(DIRECTORIO_RAIZ, elemento))
+                purgados_sync += 1
+            except Exception:
+                pass
+    if purgados_sync > 0:
+        klog("warn", f"Saneamiento: {purgados_sync} archivo(s) temporales residuales de sincronización eliminados.")
+
 
 # ==============================================================================
 # SECCIÓN 7: RUTINA DE ARRANQUE (BOOTLOADER), RED LAN Y SERVIDOR WSGI
@@ -351,7 +391,7 @@ if __name__ == "__main__":
         print("\n" + "=" * 65)
         print(f"   BOOTLOADER :: PCMPrivateClipManager v{VERSION} (OFFLINE & SECURE)   ")
         print("=" * 65)
-        time.sleep(0.15)
+        time.sleep(0.10)
 
         # 1. Auditoría y aprovisionamiento del entorno .env
         faltantes, ya_inicializado, env_existia, archivo_danado, advertencias = sanitizar_y_reparar_env(ENV_PATH)
@@ -387,113 +427,228 @@ if __name__ == "__main__":
 
         app.secret_key = os.environ.get("SECRET_KEY")
 
-        if os.environ.get("MASTER_KEY") and os.environ.get("SECRET_KEY"):
-            klog("ok", "Llaves criptográficas maestras activas (256 bits).")
+        # --- Verificación de Entropía y Longitud de Claves Maestras ---
+        master_val = os.environ.get("MASTER_KEY", "").strip("'\"")
+        sync_clave_val = os.environ.get("SYNC_CLAVE", "").strip("'\"")
 
-        # 2. Comprobación y aprovisionamiento de carpetas físicas
+        es_hex_64 = lambda s: len(s) == 64 and all(c in "0123456789abcdefABCDEF" for c in s)
+
+        master_es_256 = es_hex_64(master_val)
+        sync_es_256 = es_hex_64(sync_clave_val)
+
+        if master_es_256:
+            klog("ok", "Llaves criptográficas maestras activas (256 bits).")
+        else:
+            bits_master = len(master_val.encode("utf-8")) * 8
+            klog("info", f"Llave maestra manual activa ({bits_master} bits / clave personalizada detectada).")
+            klog("info", f"clave maestra analizada ({len(master_val)} caracteres detectada).")
+
+        sync_activa_check = os.environ.get("SYNC_HABILITADO", "false").strip().lower() == "true"
+        if sync_activa_check and not sync_es_256 and os.environ.get("SYNC_MODO_CIFRADO", "auto") != "libre":
+            bits_sync = len(sync_clave_val.encode("utf-8")) * 8
+            klog("info", f"SYNC_CLAVE manual detectada de ({bits_sync} bits).")
+            klog("info", f"SYNC_CLAVE analizada ({len(sync_clave_val)} caracteres detectados).")
+
+        # 2. Comprobación y saneamiento de almacenamiento físico
         klog("init", "Verificando estructura de almacenamiento...")
         sanear_directorios_y_archivos(ya_inicializado=ya_inicializado)
 
-        # 3. Comprobación de Bóveda Externa / Nube (Sincronización BYOC)
-        sync_activa = os.environ.get("SYNC_HABILITADO", "false").strip().lower() == "true"
-        carpeta_nube = os.environ.get("SYNC_CARPETA", "").strip()
-
-        if sync_activa and carpeta_nube:
-            klog("init", f"Verificando sincronización BYOC: {carpeta_nube}")
-            if not os.path.isdir(carpeta_nube):
-                klog("warn", "Carpeta de sincronización inalcanzable. Operando en modo local.")
-            else:
-                auto_aplicar = os.environ.get("SYNC_AUTO_APLICAR", "false").strip().lower() == "true"
-                if not auto_aplicar:
-                    klog("info", "Política de sincronización: Manual (auto-aplicar desactivado).")
-
-                meta = sync_manager.leer_metadatos_remotos(carpeta_nube)
-                if meta:
-                    rev_remota = int(meta.get("revision", 0))
-                    try:
-                        rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
-                    except ValueError:
-                        rev_local = 0
-
-                    origen = meta.get("ultimo_equipo", "Nodo Externo")
-
-                    if rev_remota > rev_local:
-                        klog("info", f"Revisión #{rev_remota} disponible desde '{origen}' (Local: #{rev_local}).")
-                        if auto_aplicar:
-                            klog("init", "Aplicando actualización de bóveda de forma segura...")
-                            modo_cif = os.environ.get("SYNC_MODO_CIFRADO", "auto").strip().lower()
-                            clave = "" if modo_cif == "libre" else os.environ.get("SYNC_CLAVE", "").strip()
-
-                            exito, msg = sync_manager.importar_boveda_cifrada(
-                                carpeta_nube, DB_PATH, UPLOADS_DIR, clave
-                            )
-                            if exito:
-                                klog("ok", msg)
-                                try:
-                                    set_key(ENV_PATH, "SYNC_ULTIMA_REVISION", str(rev_remota))
-                                    os.environ["SYNC_ULTIMA_REVISION"] = str(rev_remota)
-                                except Exception:
-                                    pass
-                            else:
-                                klog("fail", f"Sincronización rechazada: {msg}")
-                        else:
-                            klog("warn", f"Actualización pendiente (Nube #{rev_remota} > Local #{rev_local}). Auto-aplicar desactivado.")
-                    elif rev_remota == rev_local:
-                        klog("ok", f"Bóveda sincronizada al día (Revisión #{rev_local}).")
-                    else:
-                        klog("info", f"Bóveda local por delante de la nube (Local: #{rev_local}, Nube: #{rev_remota}).")
-                else:
-                    klog("info", "Carpeta externa conectada (sin bóveda remota existente).")
-
-        # 4. Auditoría de integridad de base de datos SQLite
+        # 3. Auditoría estructural local inicial de SQLite
         estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
 
         if estado_db == "bloqueada":
             klog("fail", "La base de datos se encuentra bloqueada por otro proceso.")
-            klog("warn", "Esperando 2 segundos...")
+            klog("warn", "Esperando 2 segundos para liberación de candado...")
             time.sleep(2)
             estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
             if estado_db == "bloqueada":
-                klog("fail", "Imposible acceder a pcm.db. Cierre el proceso que mantiene el candado.")
+                klog("fail", "Imposible acceder a pcm.db. Cierre el proceso que mantiene el bloqueo exclusivo.")
                 sys.exit(1)
 
-        if estado_db == "ausente":
-            klog("info", "Base de datos persistente ausente. Generando pcm.db limpio...")
-            database.inicializar_db()
-            klog("ok", "Base de datos SQLite creada e indexada.")
-
-        elif estado_db == "corrupta":
-            klog("fail", "Base de datos dañada o ilegible. Aislándola en cuarentena...")
+        if estado_db == "corrupta":
+            klog("fail", "Base de datos dañada o ilegible (sabotaje / corrupción estructural).")
             cuarentena_db = f"pcm.db.corrupt_{int(time.time())}"
             try:
                 os.rename(DB_PATH, os.path.join(DIRECTORIO_RAIZ, cuarentena_db))
-                klog("warn", f"Base corrupta aislada: {cuarentena_db}")
+                klog("warn", f"Base de datos corrupta aislada en cuarentena: {cuarentena_db}")
             except Exception:
                 try:
                     os.remove(DB_PATH)
                 except Exception:
                     pass
+
+            for ext_wal in ["-wal", "-shm", "-journal"]:
+                f_wal = DB_PATH + ext_wal
+                if os.path.exists(f_wal):
+                    try:
+                        os.remove(f_wal)
+                    except Exception:
+                        pass
+            estado_db = "ausente"
+
+        # 4. Protocolo de Sincronización BYOC y Disaster Recovery
+        sync_activa = os.environ.get("SYNC_HABILITADO", "false").strip().lower() == "true"
+        carpeta_nube = os.environ.get("SYNC_CARPETA", "").strip()
+        auto_aplicar = os.environ.get("SYNC_AUTO_APLICAR", "false").strip().lower() == "true"
+        recuperada_de_nube = False
+        boveda_bloqueada_corrupta = False
+        rev_local = 0
+        rev_remota = 0
+
+        try:
+            rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
+        except ValueError:
+            rev_local = 0
+
+        if sync_activa and carpeta_nube:
+            klog("init", f"Verificando enlace BYOC: {carpeta_nube}")
+            if not os.path.isdir(carpeta_nube):
+                klog("warn", "Carpeta de sincronización inalcanzable. Operando en modo local.")
+            else:
+                ruta_meta_fisica = os.path.join(carpeta_nube, "pcm_vault.meta")
+                ruta_zip_fisica = os.path.join(carpeta_nube, "pcm_vault.zip")
+                
+                meta = sync_manager.leer_metadatos_remotos(carpeta_nube)
+                
+                if os.path.exists(ruta_meta_fisica) and not meta:
+                    boveda_bloqueada_corrupta = True
+                    klog("fail", "Archivo 'pcm_vault.meta' corrupto o ilegible en la nube.")
+                    klog("warn", "Ignorando bóveda remota dañada por seguridad (modo local forzado).")
+
+                elif meta:
+                    rev_remota = int(meta.get("revision", 0))
+                    origen = meta.get("ultimo_equipo", "Nodo Externo")
+                    modo_cif = os.environ.get("SYNC_MODO_CIFRADO", "auto").strip().lower()
+                    clave = "" if modo_cif == "libre" else os.environ.get("SYNC_CLAVE", "").strip()
+
+                    zip_presente = os.path.exists(ruta_zip_fisica) and os.path.getsize(ruta_zip_fisica) > 0
+
+                    if not zip_presente:
+                        boveda_bloqueada_corrupta = True
+                        klog("fail", f"Inconsistencia en la nube: Existe .meta (#{rev_remota}) pero falta 'pcm_vault.zip'.")
+
+                    # CASO RESCATE: Base local ausente pero hay copia en la nube
+                    elif estado_db == "ausente":
+                        klog("warn", f"Base local no disponible. Ejecutando Rescate Automático (#{rev_remota} desde '{origen}')...")
+                        exito, msg = sync_manager.importar_boveda_cifrada(carpeta_nube, DB_PATH, UPLOADS_DIR, clave)
+                        if exito:
+                            klog("ok", f"Rescate completado con éxito: {msg}")
+                            rev_local = rev_remota
+                            recuperada_de_nube = True
+                            try:
+                                with open(os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_SYNC), "w", encoding="utf-8") as f:
+                                    f.write(str(time.time()))
+                                set_key(ENV_PATH, "SYNC_ULTIMA_REVISION", str(rev_remota))
+                                os.environ["SYNC_ULTIMA_REVISION"] = str(rev_remota)
+                            except Exception:
+                                pass
+                            estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
+                        else:
+                            boveda_bloqueada_corrupta = True
+                            klog("fail", f"Fallo al rescatar desde la nube (Firma SHA-256 o clave errónea): {msg}")
+
+                    # CASO ACTUALIZACIÓN HABITUAL
+                    elif rev_remota > rev_local:
+                        klog("info", f"Revisión remota #{rev_remota} disponible desde '{origen}' (Local: #{rev_local}).")
+                        if auto_aplicar:
+                            klog("init", "Auto-aplicando actualización de bóveda desde la nube...")
+                            exito, msg = sync_manager.importar_boveda_cifrada(carpeta_nube, DB_PATH, UPLOADS_DIR, clave)
+                            if exito:
+                                klog("ok", f"Bóveda aplicada con éxito: {msg}")
+                                rev_local = rev_remota
+                                try:
+                                    with open(os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_SYNC), "w", encoding="utf-8") as f:
+                                        f.write(str(time.time()))
+                                    set_key(ENV_PATH, "SYNC_ULTIMA_REVISION", str(rev_remota))
+                                    os.environ["SYNC_ULTIMA_REVISION"] = str(rev_remota)
+                                except Exception:
+                                    pass
+                            else:
+                                boveda_bloqueada_corrupta = True
+                                klog("fail", f"Sincronización rechazada (Integridad SHA-256 comprometida): {msg}")
+                        else:
+                            klog("warn", f"Actualización pendiente (#{rev_remota} > #{rev_local}). Subida bloqueada por seguridad anti-atraso.")
+
+                    elif rev_remota == rev_local:
+                        if not os.path.exists(ruta_zip_fisica) or os.path.getsize(ruta_zip_fisica) == 0:
+                            boveda_bloqueada_corrupta = True
+                            klog("fail", f"Alerta en la nube: Existe .meta (#{rev_local}) pero 'pcm_vault.zip' está ausente o vacío.")
+                        else:
+                            hash_esperado = meta.get("hash_sha256") or meta.get("sha256") or meta.get("hash")
+                            if hash_esperado:
+                                hash_real = calcular_sha256_local(ruta_zip_fisica)
+                                if hash_real != hash_esperado:
+                                    boveda_bloqueada_corrupta = True
+                                    klog("fail", f"Bóveda remota dañada: 'pcm_vault.zip' no coincide con su firma SHA-256.")
+                                    klog("warn", "La copia remota está corrupta. Se sugiere re-subir la bóveda local.")
+                                else:
+                                    klog("ok", f"Bóveda sincronizada al día con la nube (Revisión #{rev_local} verificada).")
+                            else:
+                                klog("ok", f"Bóveda sincronizada al día con la nube (Revisión #{rev_local}).")
+
+        # 5. Inicialización y Autocuración de Esquema
+        if estado_db == "ausente" and not recuperada_de_nube:
+            klog("info", "Generando base de datos pcm.db limpia e indexada...")
             database.inicializar_db()
-            klog("ok", "Nueva base de datos inicializada en estado limpio.")
+            klog("ok", "Base de datos SQLite creada.")
+            try:
+                with open(os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_SYNC), "w", encoding="utf-8") as f:
+                    f.write(str(time.time() + 2.0))
+            except Exception:
+                pass
+            estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
 
         elif estado_db in ["incompleta", "ok"]:
             database.inicializar_db()
             klog("ok", f"Base verificada: {n_clips} clips, {n_codigos} cod, {n_resumenes} notas, {n_docs} docs.")
 
-        # 5. Verificación de última instantánea de respaldo
+        # 6. Auditoría cruzada de sincronización y modificaciones
+        if sync_activa and carpeta_nube:
+            ruta_sync = os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_SYNC)
+            ultimo_sync_ts = 0.0
+            hay_nube_pendiente = bool(rev_remota > rev_local)
+
+            if os.path.exists(ruta_sync):
+                try:
+                    with open(ruta_sync, "r", encoding="utf-8") as f:
+                        ultimo_sync_ts = float(f.read().strip())
+                        fecha_sync_str = datetime.fromtimestamp(ultimo_sync_ts).strftime("%Y-%m-%d %H:%M:%S")
+
+                        if os.path.exists(DB_PATH):
+                            db_mtime = os.path.getmtime(DB_PATH)
+                            total_registros = n_clips + n_codigos + n_resumenes + n_docs
+
+                            if total_registros > 0 and db_mtime > (ultimo_sync_ts + 1.5):
+                                klog("warn", f"Cambios locales en pcm.db posteriores al último sync ({fecha_sync_str}).")
+                            elif boveda_bloqueada_corrupta:
+                                klog("fail", f"Sincronización suspendida: Bóveda remota #{rev_remota} bloqueada por integridad.")
+                            elif hay_nube_pendiente:
+                                klog("warn", f"Último sync local: {fecha_sync_str} (Pendiente descargar #{rev_remota} de la nube).")
+                            else:
+                                klog("ok", f"Última sincronización confirmada: {fecha_sync_str} (Datos locales al día).")
+                        else:
+                            klog("ok", f"Última sincronización registrada: {fecha_sync_str}")
+                except Exception:
+                    klog("warn", "Archivo de seguimiento de sincronización corrupto (ignorado).")
+            else:
+                klog("info", "Sin registro de sincronización previa en este nodo (archivo testigo ausente).")
+        else:
+            klog("info", "Sincronización BYOC desactivada (Operando en modo local independiente).")
+
+        # 7. Verificación de última instantánea de respaldo manual (JSON/ZIP)
         ruta_backup = os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_BACKUP)
         if os.path.exists(ruta_backup):
             try:
                 with open(ruta_backup, "r", encoding="utf-8") as f:
-                    ts = float(f.read().strip())
-                    fecha_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
-                    klog("ok", f"Último respaldo verificado: {fecha_str}")
+                    ts_bk = float(f.read().strip())
+                    fecha_bk_str = datetime.fromtimestamp(ts_bk).strftime("%Y-%m-%d %H:%M")
+                    klog("ok", f"Último respaldo manual verificado: {fecha_bk_str}")
             except Exception:
-                klog("warn", "Archivo de seguimiento de backup corrupto (ignorado).")
+                klog("warn", "Archivo de seguimiento de respaldo manual corrupto (ignorado).")
         else:
-            klog("info", "No se detecta snapshot de respaldo previo.")
+            klog("info", "No se detecta snapshot de respaldo manual previo.")
 
-        # 6. Detección y advertencia de credenciales por defecto
+        # 8. Detección y advertencia de credenciales por defecto
         contrasena_ya_mostrada = os.environ.get("CONTRASENA_MOSTRADA", "false").strip().lower() == "true"
         if os.environ.get("APP_PASSWORD") == "cambiame" and not contrasena_ya_mostrada:
             print("\n" + "!" * 65)
@@ -506,7 +661,7 @@ if __name__ == "__main__":
         print(f" [i] CONSOLA DE ADMINISTRACIÓN DISPONIBLE: {comando_cli}")
         print("-" * 65)
 
-    # Configuración de red
+    # Configuración de red y modo WSGI
     load_dotenv(ENV_PATH, override=True)
     app.secret_key = os.environ.get("SECRET_KEY")
 
@@ -517,14 +672,13 @@ if __name__ == "__main__":
     except ValueError:
         port = 5545
 
-    # Resolución de acceso local o LAN
     if not es_reloader:
         klog("info", f"Modo Debug: {debug_mode}")
         if host == "0.0.0.0":
             ip_lan = "127.0.0.1"
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
+                s.connect(("10.255.255.255", 1))
                 ip_lan = s.getsockname()[0]
                 s.close()
             except Exception:
@@ -545,13 +699,11 @@ if __name__ == "__main__":
         print(">>> PCMPrivateClipManager OPERATIVO Y LISTO <<<")
         print("-" * 65 + "\n")
 
-    # Apertura diferida del navegador
     auto_abrir = os.environ.get("AUTO_ABRIR_NAVEGADOR", "true").strip().lower() == "true"
     if auto_abrir and (ES_EXE or not es_reloader):
         url_destino = f"http://127.0.0.1:{port}"
         threading.Timer(1.2, lambda: webbrowser.open(url_destino)).start()
 
-    # Ejecución del servidor HTTP
     app.run(
         host=host,
         port=port,

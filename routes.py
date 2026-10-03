@@ -9,7 +9,7 @@ Núcleo de peticiones HTTP para Flask. Gestiona:
 4. Subida segura y validación binaria de imágenes (Tope estricto de 25 MiB).
 5. Sistema de exportación/importación de backups (.json y .zip con assets).
 6. Sincronización BYOC multidispositivo con cifrado E2EE (AES-256).
-7. Diagnóstico y mantenimiento del sistema de archivos y base de datos SQLite.
+7. Diagnóstico, integridad criptográfica SHA-256 y mantenimiento.
 ==============================================================================
 """
 
@@ -23,6 +23,7 @@ import secrets
 import shutil
 import zipfile
 import uuid
+import hashlib
 from datetime import datetime
 from functools import wraps
 from werkzeug.utils import secure_filename
@@ -165,6 +166,46 @@ def formatear_tamano(bytes_cant):
     else:
         return f"{bytes_cant / (1024 * 1024):.2f} MB"
 
+formatear_bytes = formatear_tamano
+
+
+def calcular_sha256_archivo(ruta):
+    """Calcula el hash SHA-256 de un archivo en disco de forma segura mediante streaming."""
+    if not os.path.exists(ruta):
+        return None
+    try:
+        h = hashlib.sha256()
+        with open(ruta, "rb") as f:
+            for bloque in iter(lambda: f.read(65536), b""):
+                h.update(bloque)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+def verificar_integridad_zip_remoto(ruta_zip, meta_dict):
+    """Verifica si el paquete ZIP existe, no está vacío, es estructuralmente válido y coincide su SHA-256."""
+    if not os.path.exists(ruta_zip) or os.path.getsize(ruta_zip) == 0:
+        return False
+
+    # 1. Validación física de estructura ZIP (detecta archivos cortados o truncados)
+    if not zipfile.is_zipfile(ruta_zip):
+        return False
+
+    # 2. Validación de firma criptográfica SHA-256 (tolerante a cualquier clave)
+    if meta_dict:
+        hash_esperado = (
+            meta_dict.get("sha256")
+            or meta_dict.get("hash_sha256")
+            or meta_dict.get("hash")
+            or meta_dict.get("checksum")
+        )
+        if hash_esperado:
+            hash_calculado = calcular_sha256_archivo(ruta_zip)
+            if hash_calculado != hash_esperado:
+                return False
+
+    return True
+
 
 @clips_bp.app_context_processor
 def inyectar_contexto():
@@ -185,7 +226,6 @@ def inyectar_contexto():
         db_path = getattr(database, "DB_PATH", "pcm.db")
         if os.path.exists(db_path):
             db_mtime = os.path.getmtime(db_path)
-            # Si la base de datos se modificó después del último sync (margen de 1.5s)
             if db_mtime > (ultimo_sync_ts + 1.5):
                 cambios_pendientes = True
 
@@ -785,7 +825,7 @@ def configuracion():
         set_key(RUTA_ENV, "AUTO_ABRIR_NAVEGADOR", auto_abrir)
         os.environ["AUTO_ABRIR_NAVEGADOR"] = auto_abrir
 
-# --- Variables de Sincronización BYOC (E2EE) ---
+        # --- Variables de Sincronización BYOC (E2EE) ---
         sync_hab = "true" if "sync_habilitado" in request.form else "false"
         set_key(RUTA_ENV, "SYNC_HABILITADO", sync_hab)
         os.environ["SYNC_HABILITADO"] = sync_hab
@@ -824,21 +864,22 @@ def configuracion():
 
         rev_form = request.form.get("sync_ultima_revision", "").strip()
         if rev_form.isdigit():
-            # Comprobamos si la carpeta de nube ya tiene una bóveda activa
+            # 🛡 Blindaje físico: Comprobar existencia real de archivo .meta (incluso si está dañado)
+            ruta_meta_f = os.path.join(sync_carp, "pcm_vault.meta") if sync_carp and os.path.isdir(sync_carp) else None
+            existe_meta_fisico = bool(ruta_meta_f and os.path.exists(ruta_meta_f))
             meta_nube = sync_manager.leer_metadatos_remotos(sync_carp) if sync_carp and os.path.isdir(sync_carp) else None
-            if not meta_nube:
+
+            if not existe_meta_fisico and not meta_nube:
                 set_key(RUTA_ENV, "SYNC_ULTIMA_REVISION", rev_form)
                 os.environ["SYNC_ULTIMA_REVISION"] = rev_form
                 registrar_log(f"Contador de revisión local fijado a: #{rev_form}", "SYS")
             else:
-                # Si la nube ya tiene una bóveda, se descarta el cambio manual para proteger la cadena
-                registrar_log("Intento de cambio de revisión ignorado: existe una bóveda activa en la nube", "WARN")
+                registrar_log("Intento de cambio de revisión ignorado: existe una bóveda activa o archivo .meta en la nube", "WARN")
 
-# Si la clave cambió y la sincronización está activa, purgar y re-cifrar de inmediato
+        # Si la clave cambió y la sincronización está activa, purgar y re-cifrar de inmediato
         if clave_rotada and sync_hab == "true" and sync_carp and os.path.isdir(sync_carp):
             registrar_log(f"Iniciando protocolo de rotación de llave en: {sync_carp}", "SYS")
             
-            # 1. Purgado detallado de la bóveda anterior
             archivos_a_purgar = ["pcm_vault.zip", "pcm_vault.meta", "pcm_vault.prev.zip", "pcm_vault.zip.tmp"]
             for archivo_obsoleto in archivos_a_purgar:
                 ruta_obs = os.path.join(sync_carp, archivo_obsoleto)
@@ -849,7 +890,6 @@ def configuracion():
                     except Exception as e:
                         registrar_log(f"No se pudo eliminar {archivo_obsoleto}: {e}", "ERROR")
 
-            # 2. Generación de nueva versión re-cifrada
             try:
                 rev_actual = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip()) + 1
             except ValueError:
@@ -879,69 +919,105 @@ def configuracion():
         registrar_log("Ajustes del servidor y variables de sincronización .env actualizadas")
         return redirect(url_for("clips.configuracion", guardado=1))
 
+    # ==========================================================================
+    # PROCESAMIENTO GET: RECOPILACIÓN DE MÉTRICAS Y TELEMETRÍA (ARQUITECTURA v3.5)
+    # ==========================================================================
     registrar_log("Panel de configuración y ajustes del sistema abierto")
 
-    # Métricas de base de datos SQLite
-    conn = database.obtener_conexion()
-    total_clips = conn.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'clip'").fetchone()[0]
-    total_codigo = conn.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'codigo'").fetchone()[0]
-    total_resumenes = conn.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'nota'").fetchone()[0]
-    total_documentos = conn.execute("SELECT COUNT(*) FROM documentos").fetchone()[0]
-    conn.close()
-
-    # Diagnóstico de almacenamiento físico
+    # 1. Diagnóstico de la Base de Datos SQLite (Normalizada con columna 'tipo')
+    total_clips = 0
+    total_resumenes = 0
+    total_codigo = 0
+    total_documentos = 0
     peso_db = "0 KB"
-    if os.path.exists("pcm.db"):
-        peso_db = formatear_tamano(os.path.getsize("pcm.db"))
 
-    total_peso_img = 0
+    db_path = getattr(database, "DB_PATH", "pcm.db")
+    if os.path.exists(db_path):
+        try:
+            peso_db = formatear_tamano(os.path.getsize(db_path))
+            conn = database.obtener_conexion()
+            cur = conn.cursor()
+
+            cur.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'clip'")
+            total_clips = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'nota'")
+            total_resumenes = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM clips WHERE tipo = 'codigo'")
+            total_codigo = cur.fetchone()[0]
+
+            cur.execute("SELECT COUNT(*) FROM documentos")
+            total_documentos = cur.fetchone()[0]
+            conn.close()
+        except Exception:
+            pass
+
+    # 2. Diagnóstico de Almacenamiento Multimedia
     cant_imagenes = 0
+    peso_imagenes = "0 KB"
     if os.path.exists(CARPETA_IMAGENES_DOCS):
-        for archivo in os.listdir(CARPETA_IMAGENES_DOCS):
-            ruta_f = os.path.join(CARPETA_IMAGENES_DOCS, archivo)
-            if os.path.isfile(ruta_f):
-                cant_imagenes += 1
-                total_peso_img += os.path.getsize(ruta_f)
-    peso_imagenes = formatear_tamano(total_peso_img)
+        try:
+            archivos_img = [f for f in os.listdir(CARPETA_IMAGENES_DOCS) if os.path.isfile(os.path.join(CARPETA_IMAGENES_DOCS, f))]
+            cant_imagenes = len(archivos_img)
+            total_bytes = sum(os.path.getsize(os.path.join(CARPETA_IMAGENES_DOCS, f)) for f in archivos_img)
+            peso_imagenes = formatear_tamano(total_bytes)
+        except Exception:
+            pass
 
-    valores = dotenv_values(RUTA_ENV)
+# 3. Diagnóstico de Sincronización BYOC en Vivo (Detección de .meta y .zip Corruptos)
+    sync_hab_val = os.environ.get("SYNC_HABILITADO", "false").strip().lower() == "true"
+    sync_carp_val = os.environ.get("SYNC_CARPETA", "").strip()
 
-    # Estado de la bóveda de sincronización BYOC
-    carpeta_sync = valores.get("SYNC_CARPETA", "").strip()
-    meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync) if carpeta_sync else None
-    
     try:
-        rev_local = int(valores.get("SYNC_ULTIMA_REVISION", "0").strip())
+        rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
     except ValueError:
         rev_local = 0
 
-    rev_remota = int(meta_remoto.get("revision", 0)) if meta_remoto else 0
-    estado_sync = "desconectado"
-    if carpeta_sync and os.path.isdir(carpeta_sync):
-        if not meta_remoto:
-            estado_sync = "sin_boveda_remota"
-        elif rev_remota > rev_local:
-            estado_sync = "pendiente_descarga"
-        elif rev_local > rev_remota:
-            estado_sync = "adelantado_local"
+    meta_remoto = None
+    rev_remota = 0
+    estado_sync = "desactivado"
+
+    if sync_hab_val and sync_carp_val and os.path.isdir(sync_carp_val):
+        ruta_meta_fisica = os.path.join(sync_carp_val, "pcm_vault.meta")
+        ruta_zip_fisica = os.path.join(sync_carp_val, "pcm_vault.zip")
+        meta_remoto = sync_manager.leer_metadatos_remotos(sync_carp_val)
+
+        if os.path.exists(ruta_meta_fisica) and not meta_remoto:
+            estado_sync = "meta_corrupto"
+        elif meta_remoto:
+            rev_remota = int(meta_remoto.get("revision", 0))
+            zip_valido = verificar_integridad_zip_remoto(ruta_zip_fisica, meta_remoto)
+
+            if rev_remota > rev_local:
+                estado_sync = "pendiente_descarga" if zip_valido else "zip_corrupto"
+            elif rev_remota < rev_local:
+                estado_sync = "adelantado_local"
+            else:
+                estado_sync = "al_dia" if zip_valido else "zip_corrupto"
         else:
-            estado_sync = "al_dia"
+            estado_sync = "sin_boveda_remota"
+    elif sync_hab_val:
+        estado_sync = "carpeta_invalida"
+
+    # Lectura limpia del archivo .env para el formulario
+    valores_env = dict(dotenv_values(RUTA_ENV)) if os.path.exists(RUTA_ENV) else {}
 
     return render_template(
         "config.html",
-        total_clips=total_clips,
-        total_codigo=total_codigo,
-        total_resumenes=total_resumenes,
-        total_documentos=total_documentos,
-        peso_db=peso_db,
-        peso_imagenes=peso_imagenes,
-        cant_imagenes=cant_imagenes,
-        valores=valores,
+        valores=valores_env,
         desbloqueo_critico_activo=desbloqueado,
         desbloqueo_segundos_restantes=segundos_restantes,
-        meta_remoto=meta_remoto,
+        total_clips=total_clips,
+        total_resumenes=total_resumenes,
+        total_codigo=total_codigo,
+        total_documentos=total_documentos,
+        peso_db=peso_db,
+        cant_imagenes=cant_imagenes,
+        peso_imagenes=peso_imagenes,
         rev_local=rev_local,
         rev_remota=rev_remota,
+        meta_remoto=meta_remoto,
         estado_sync=estado_sync
     )
 
@@ -1082,10 +1158,8 @@ def importar_backup():
         conn = database.obtener_conexion()
         cur = conn.cursor()
 
-        # Restauración de clips con preservación estricta de la columna 'tipo'
         for c in clips_a_restaurar:
             tipo_clip = c.get("tipo")
-            # Autodetección resiliente para backups previos a la separación de esquemas
             if not tipo_clip:
                 cat = c.get("categoria", "")
                 if cat.startswith("Codigo:"):
@@ -1148,6 +1222,15 @@ def sync_subir_boveda():
         flash("La carpeta de sincronización no está configurada o no es accesible.", "error")
         return redirect(url_for("clips.configuracion"))
 
+    # 🛡️ Blindaje anti-sobreescritura ante archivos .meta corruptos
+    ruta_meta_fisica = os.path.join(carpeta_sync, "pcm_vault.meta")
+    meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync)
+
+    if os.path.exists(ruta_meta_fisica) and not meta_remoto:
+        registrar_log("Subida bloqueada: 'pcm_vault.meta' corrupto en la nube.", "ERROR")
+        flash("⛔ Subida bloqueada por seguridad: Se detectó un archivo 'pcm_vault.meta' corrupto en la nube. Repare o limpie la carpeta remota para evitar sobreescribir datos accidentalmente.", "error")
+        return redirect(url_for("clips.configuracion"))
+
     registrar_log(f"Iniciando empaquetado de bóveda hacia: {carpeta_sync}", "SYS")
 
     try:
@@ -1155,11 +1238,10 @@ def sync_subir_boveda():
     except ValueError:
         rev_local = 0
 
-    meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync)
     if meta_remoto:
         rev_remota = int(meta_remoto.get("revision", 0))
         
-        # 🛡️ BLINDAJE ANTI-SOBREESCRITURA Y CONFLICTOS
+        # 🛡️ Blindaje anti-atraso
         if rev_remota > rev_local:
             equipo_nube = meta_remoto.get("ultimo_equipo", "otro dispositivo")
             registrar_log(f"Subida rechazada: Conflicto detectado (Local #{rev_local} < Nube #{rev_remota} de {equipo_nube})", "WARN")
@@ -1213,7 +1295,13 @@ def sync_descargar_boveda():
         flash("La carpeta de sincronización no está configurada o no es accesible.", "error")
         return redirect(url_for("clips.configuracion"))
 
+    ruta_meta_fisica = os.path.join(carpeta_sync, "pcm_vault.meta")
     meta_remoto = sync_manager.leer_metadatos_remotos(carpeta_sync)
+
+    if os.path.exists(ruta_meta_fisica) and not meta_remoto:
+        flash("El archivo de metadatos (.meta) en la nube está corrupto o ilegible. Operación abortada por seguridad.", "error")
+        return redirect(url_for("clips.configuracion"))
+
     if not meta_remoto:
         flash("No se encontró ningún archivo de metadatos (.meta) en la carpeta de nube.", "error")
         return redirect(url_for("clips.configuracion"))
@@ -1261,11 +1349,25 @@ def sync_consultar_estado():
             "estado": "desconectado"
         })
 
+    ruta_meta_fisica = os.path.join(carpeta_sync, "pcm_vault.meta")
+    ruta_zip_fisica = os.path.join(carpeta_sync, "pcm_vault.zip")
     meta = sync_manager.leer_metadatos_remotos(carpeta_sync)
+
     try:
         rev_local = int(os.environ.get("SYNC_ULTIMA_REVISION", "0").strip())
     except ValueError:
         rev_local = 0
+
+    if os.path.exists(ruta_meta_fisica) and not meta:
+        registrar_log(f"Comprobación de nube: Archivo .meta corrupto en '{carpeta_sync}'", "ERROR")
+        return jsonify({
+            "habilitado": True,
+            "carpeta_valida": True,
+            "hay_boveda": False,
+            "meta_corrupto": True,
+            "rev_local": rev_local,
+            "estado": "meta_corrupto"
+        })
 
     if not meta:
         registrar_log(f"Comprobación de nube: Carpeta activa sin bóveda remota (Local: #{rev_local})", "SYS")
@@ -1273,17 +1375,22 @@ def sync_consultar_estado():
             "habilitado": True,
             "carpeta_valida": True,
             "hay_boveda": False,
+            "meta_corrupto": False,
             "rev_local": rev_local,
             "estado": "sin_boveda_remota"
         })
 
     rev_remota = int(meta.get("revision", 0))
     equipo_remoto = meta.get("ultimo_equipo", "Desconocido")
+    zip_valido = verificar_integridad_zip_remoto(ruta_zip_fisica, meta)
+
     estado = "al_dia"
     if rev_remota > rev_local:
-        estado = "pendiente_descarga"
+        estado = "pendiente_descarga" if zip_valido else "zip_corrupto"
     elif rev_local > rev_remota:
         estado = "adelantado_local"
+    elif not zip_valido:
+        estado = "zip_corrupto"
 
     registrar_log(f"Comprobación de nube: Local #{rev_local} vs Nube #{rev_remota} [{equipo_remoto}] -> Estado: {estado}", "SYS")
 
@@ -1291,6 +1398,7 @@ def sync_consultar_estado():
         "habilitado": True,
         "carpeta_valida": True,
         "hay_boveda": True,
+        "meta_corrupto": False,
         "rev_local": rev_local,
         "rev_remota": rev_remota,
         "ultimo_equipo": equipo_remoto,
@@ -1352,7 +1460,6 @@ def purgar_imagenes_huerfanas():
 
 def seleccionar_carpeta_nativa():
     """Abre el explorador de carpetas nativo del sistema operativo de forma resiliente."""
-    # 1. Intento nativo en Windows mediante PowerShell (no congela ni bloquea hilos)
     if sys.platform == "win32":
         try:
             ps_script = (
@@ -1369,7 +1476,6 @@ def seleccionar_carpeta_nativa():
         except Exception:
             pass
 
-    # 2. Intento mediante Tkinter (multiplataforma)
     try:
         import tkinter as tk
         from tkinter import filedialog
@@ -1383,7 +1489,6 @@ def seleccionar_carpeta_nativa():
     except Exception:
         pass
 
-    # 3. Intento en Linux mediante Zenity
     if sys.platform.startswith("linux"):
         try:
             res = subprocess.run(["zenity", "--file-selection", "--directory", "--title=Selecciona la carpeta de tu Nube"], capture_output=True, text=True)
@@ -1407,7 +1512,6 @@ def sync_explorar_carpeta():
     if not ruta_base:
         return jsonify({"ok": False, "cancelado": True})
 
-    # Si el usuario eligió una carpeta base, anexamos automáticamente 'PCM_Sync' si no lo tiene
     nombre_carpeta = os.path.basename(ruta_base.rstrip("/\\"))
     if nombre_carpeta.lower() != "pcm_sync":
         ruta_final = os.path.join(ruta_base, "PCM_Sync")
@@ -1415,7 +1519,6 @@ def sync_explorar_carpeta():
         ruta_final = ruta_base
 
     try:
-        # El programa crea la carpeta físicamente si aún no existía
         os.makedirs(ruta_final, exist_ok=True)
         registrar_log(f"Carpeta de sincronización aprovisionada automáticamente: {ruta_final}", "SYS")
         return jsonify({

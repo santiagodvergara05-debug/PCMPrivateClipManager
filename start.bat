@@ -5,8 +5,8 @@ cd /d "%~dp0"
 :: ===================================================================
 :: CONFIGURACIÓN DEL CARGADOR DE ENTORNO
 :: ===================================================================
-set "APP_NAME=PCMPrivateClipManager"
-set "APP_VER=v2.5.0"
+set "APP_NAME=PCMPrivateClipManager Bootloader"
+set "APP_VER=v3.2.0"
 set "APP_PORT=5545"
 set "APP_FILE=app.py"
 

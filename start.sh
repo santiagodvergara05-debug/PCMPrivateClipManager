@@ -6,8 +6,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 # ===================================================================
 # CONFIGURACION DEL CARGADOR DE ENTORNO
 # ===================================================================
-APP_NAME="PCMPrivateClipManager"
-APP_VER="v2.5.0"
+APP_NAME="PCMPrivateClipManager Bootloader"
+APP_VER="v3.2.0"
 APP_PORT="5545"
 APP_FILE="app.py"
 

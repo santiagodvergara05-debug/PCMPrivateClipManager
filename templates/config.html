@@ -120,8 +120,9 @@
                     <strong style="color: #f39c12; font-size: 0.95rem;">¡Paquete Remoto Incompleto o Corrupto!</strong>
                     <p style="margin: 0.3rem 0 0; font-size: 0.88rem; color: #e0e0e0; line-height: 1.45;">
                         El archivo <code>pcm_vault.zip</code> en tu carpeta remota no coincide con la firma criptográfica SHA-256 esperada.
-                        Es probable que OneDrive o Google Drive aún lo estén subiendo, o que el archivo se haya truncado.
+                        Es probable que el servicio de almacenamiento en la nube aún lo estén subiendo, o que el archivo se haya truncado.
                         La descarga ha sido <strong>bloqueada para evitar corromper tu base de datos local</strong>.
+                        si el error persiste, vacie la carpeta y resuba la bóveda desde tu equipo.
                     </p>
                 </div>
             </div>
@@ -201,7 +202,7 @@
                 <form method="POST" action="{{ url_for('clips.sync_descargar_boveda') }}" style="flex: 1.5; min-width: 220px;"
                       onsubmit="return confirm('¿Descargar y aplicar la bóveda de la nube? Se respaldará tu base de datos local actual antes de reemplazarla.');">
                     <button type="submit" id="btnDescargarSync" class="btn-config secondary" style="width: 100%;"
-                            {% if estado_sync not in ['pendiente_descarga', 'al_dia'] or estado_sync == 'zip_corrupto' %}
+                            {% if estado_sync not in ['pendiente_descarga', 'al_dia'] or estado_sync in ['meta_corrupto', 'zip_corrupto'] %}
                                 disabled 
                                 title="{% if estado_sync == 'zip_corrupto' %}Descarga bloqueada: firma SHA-256 no coincide o archivo incompleto{% elif estado_sync == 'meta_corrupto' %}Descarga bloqueada: archivo .meta corrupto{% else %}No hay bóveda remota para descargar{% endif %}"
                             {% endif %}>
@@ -562,31 +563,109 @@
     </section>
 </main>
 
-<!-- VENTANAS MODALES -->
+<!-- ================================================================= -->
+<!-- VENTANA MODAL: GUÍA DE CONFIGURACIÓN BYOC MULTINUBE & REGLAS -->
+<!-- ================================================================= -->
 <div id="modalSyncHelp" class="modal-overlay" onclick="cerrarModalSync(event)">
     <div class="modal-content" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <h3>☁️ Arquitectura BYOC y Protocolo de Sincronización E2EE</h3>
+            <h3>☁️ ¿Cómo funciona BYOC (Bring Your Own Cloud)?</h3>
             <button type="button" class="modal-close" onclick="cerrarModalSync()">&times;</button>
         </div>
-        <div class="modal-body">
+        
+        <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
             <p>
-                <strong>PCMPrivateClipManager</strong> opera bajo el principio estricto de <strong>Zero-Knowledge Encryption</strong>. El sistema no depende de intermediarios, APIs propietarias ni servidores de terceros. Los datos se empaquetan y cifran localmente con el algoritmo <strong>AES-256</strong> mediante <code>pyzipper</code>, permitiendo utilizar cualquier nube como canal de transporte seguro.
+                <strong>PCMPrivateClipManager</strong> opera bajo el principio estricto de <strong>Zero-Knowledge Encryption</strong>. No depende de intermediarios, APIs propietarias ni servidores de terceros. Los datos se empaquetan y cifran localmente con el algoritmo <strong>AES-256</strong> mediante <em>pyzipper</em>, utilizando tu cliente de almacenamiento preferido exclusivamente como medio de transporte seguro.
             </p>
+
+            <h4>✨ ¡Configuración Automática en un solo clic!</h4>
+            <p>
+                No necesitas crear carpetas manualmente ni copiar rutas engorrosas:
+                <br>
+                1. Desbloquea la configuración con tu <strong>Master Key</strong>.
+                <br>
+                2. Haz clic en el botón <strong>«📂 Examinar...»</strong>.
+                <br>
+                3. Selecciona la carpeta base de tu servicio en el explorador de Windows.
+                <br>
+                4. <strong>PCM creará automáticamente la subcarpeta <code>PCM_Sync</code></strong> en tu disco y la dejará lista para operar.
+            </p>
+
+            <h4>📁 Rutas y Ejemplos de Configuración por Servicio:</h4>
+
+            <div class="cloud-provider-card">
+                <strong>🟦 Microsoft OneDrive</strong>
+                <p>Selecciona tu carpeta personal de OneDrive y PCM creará automáticamente la subcarpeta:</p>
+                <code>C:\Users\TuUsuario\OneDrive\PCM_Sync</code>
+            </div>
+
+            <div class="cloud-provider-card">
+                <strong>🔴 MEGAsync</strong>
+                <p>Selecciona tu directorio raíz sincronizado de MEGA:</p>
+                <code>C:\Users\TuUsuario\MEGAsync\PCM_Sync</code>
+            </div>
+
+            <div class="cloud-provider-card">
+                <strong>🔵 Google Drive (App de escritorio)</strong>
+                <p>Apunta hacia la unidad virtual asignada:</p>
+                <code>G:\Mi unidad\PCM_Sync</code>
+            </div>
+
+            <div class="cloud-provider-card">
+                <strong>📦 Dropbox</strong>
+                <p>Selecciona tu carpeta local de Dropbox:</p>
+                <code>C:\Users\TuUsuario\Dropbox\PCM_Sync</code>
+            </div>
+
+            <div class="cloud-provider-card">
+                <strong>⚡ Syncthing / Pendrive USB / Red LAN Compartida</strong>
+                <p>Compatible con cualquier volumen o unidad accesible en el sistema operativo:</p>
+                <code>E:\PCM_Sync</code> o <code>\\ServidorLocal\Compartido\PCM_Sync</code>
+            </div>
+
             <h4>🛡️ Reglas de Oro de Sincronización:</h4>
-            <ul style="padding-left: 1.2rem; margin-top: 0.3rem;">
-                <li style="margin-bottom: 0.5rem;"><strong>Protección Anti-Atraso:</strong> Si en la nube hay una versión más reciente, la subida queda bloqueada. Debes descargar primero.</li>
-                <li style="margin-bottom: 0.5rem;"><strong>Control de Reseteo a Revisión #0:</strong> El contador no puede reiniciarse a voluntad mientras la nube contenga una bóveda activa o metadatos presentes.</li>
-                <li style="margin-bottom: 0.5rem;"><strong>Rotación de Llaves:</strong> Al regenerar una clave, la bóveda anterior es purgada y el nuevo paquete se compila con la revisión siguiente.</li>
-                <li style="margin-bottom: 0.5rem;"><strong>Extracción Atómica y Verificación SHA-256:</strong> Antes de reemplazar tu base de datos local, el sistema valida la firma criptográfica.</li>
+            <ul style="padding-left: 1.2rem; margin-top: 0.4rem; line-height: 1.5;">
+                <li style="margin-bottom: 0.45rem;">
+                    <strong>Clave de cifrado idéntica:</strong> El valor de <code>SYNC_CLAVE</code> debe ser exactamente el mismo en tu PC y tu notebook para poder abrir y descifrar la bóveda.
+                </li>
+                <li style="margin-bottom: 0.45rem;">
+                    <strong>Rutas físicas independientes:</strong> En cada equipo la carpeta de la nube puede estar en discos o rutas distintas. Cada equipo solo apunta a donde su propio cliente de nube sincroniza.
+                </li>
+                <li style="margin-bottom: 0.45rem;">
+                    <strong>Protección Anti-Atraso:</strong> Si en la nube hay una versión más reciente (<code>#Remota > #Local</code>), la subida queda estrictamente bloqueada. Debes descargar y aplicar cambios primero.
+                </li>
+                <li style="margin-bottom: 0.45rem;">
+                    <strong>Extracción Atómica y Verificación SHA-256:</strong> Antes de reemplazar tu base de datos local, el sistema valida la firma hash de <code>pcm_vault.zip</code> contra <code>pcm_vault.meta</code>. Si está dañado o incompleto, la operación se cancela sin tocar tus datos locales.
+                </li>
+                <li style="margin-bottom: 0.45rem;">
+                    <strong>Rotación de Llaves:</strong> Al regenerar una clave, la bóveda anterior en la nube se elimina y el nuevo paquete se compila automáticamente con la revisión siguiente.
+                </li>
+                <li style="margin-bottom: 0.45rem;">
+                    <strong>Control de Reseteo a Revisión #0:</strong> El contador no puede reiniciarse a voluntad mientras la nube contenga una bóveda activa o archivo <code>.meta</code> presente.
+                </li>
             </ul>
+
+            <h4>🚑 Rescate Automático y Recuperación ante Desastres (Bootloader):</h4>
+            <div class="cloud-provider-card" style="border-left: 4px solid #388bfd;">
+                <strong>Recuperación de Emergencia Automática:</strong>
+                <p>
+                    Si al iniciar el sistema el bootloader detecta que la base de datos local (<code>pcm.db</code>) está comprometida (archivo borrado, corrupto o aislado en cuarentena), <strong>priorizará automáticamente restaurar la última copia íntegra disponible en la nube</strong>.
+                </p>
+                <p style="margin-top: 0.5rem;">
+                    • <strong>Prioridad sobre la auto-sincronización:</strong> Este rescate de emergencia se ejecuta <em>incluso si la opción de auto-aplicar revisiones al arrancar está desactivada</em>, garantizando que el sistema no empiece vacío si hay datos intactos en la nube.
+                    <br>
+                    • <strong>Aislamiento en modo offline:</strong> El bootloader <em>ignorará por completo cualquier intento de auto-recuperación</em> si la sincronización se encuentra inhabilitada (<code>SYNC_HABILITADO=false</code>), operando exclusivamente en modo local limpio.
+                </p>
+            </div>
         </div>
+
         <div class="modal-footer">
             <button type="button" class="btn-config primary" onclick="cerrarModalSync()">Entendido</button>
         </div>
     </div>
 </div>
 
+<!-- MODAL PROPIO DE CONFIRMACIÓN DE ROTACIÓN DE LLAVE -->
 <div id="modalConfirmRotacion" class="modal-overlay" onclick="cerrarModalRotacion(event)">
     <div class="modal-content modal-sm" onclick="event.stopPropagation()">
         <div class="modal-header">
@@ -861,7 +940,7 @@
 
             if (!data.habilitado || !data.carpeta_valida) {
                 if (txtEstado) txtEstado.textContent = 'Carpeta no accesible o desactivada';
-                if (iconEstado) iconEstado.textContent = '⚠️️';
+                if (iconEstado) iconEstado.textContent = '⚠';
                 if (bannerCorrupto) bannerCorrupto.style.display = 'none';
                 if (bannerZipCorrupto) bannerZipCorrupto.style.display = 'none';
                 btn.innerHTML = '⚠ Desconectado';

@@ -22,10 +22,8 @@ import os
 import sys
 import time
 import secrets
-import logging
 import socket
 import sqlite3
-import shutil
 import webbrowser
 import threading
 import hashlib
@@ -42,7 +40,7 @@ import sync_manager
 from routes import clips_bp, RUTA_ULTIMO_BACKUP, RUTA_ULTIMO_SYNC
 from version import VERSION
 
-# Detección de empaquetado PyInstaller (sys.frozen = True cuando es un binario .exe)
+# Detección de empaquetado PyInstaller (sys.frozen = True en binarios .exe)
 ES_EXE = getattr(sys, "frozen", False)
 if ES_EXE:
     DIRECTORIO_RAIZ = os.path.dirname(sys.executable)
@@ -52,7 +50,7 @@ else:
     BUNDLE_DIR = DIRECTORIO_RAIZ
 os.chdir(DIRECTORIO_RAIZ)
 
-# Rutas persistentes en disco local
+# Rutas de almacenamiento persistente en disco local
 ENV_PATH = os.path.join(DIRECTORIO_RAIZ, ".env")
 DB_PATH = os.path.join(DIRECTORIO_RAIZ, "pcm.db")
 UPLOADS_DIR = os.path.join(DIRECTORIO_RAIZ, "static", "uploads", "documentos")
@@ -60,18 +58,23 @@ BACKUPS_DIR = os.path.join(DIRECTORIO_RAIZ, "backups")
 
 
 # ==============================================================================
-# SECCIÓN 2: INICIALIZACIÓN DE FLASK Y REGLAS DE SEGURIDAD GLOBALES
+# SECCIÓN 2: INICIALIZACIÓN DE FLASK Y POLÍTICAS DE SEGURIDAD HTTP
 # ==============================================================================
+load_dotenv(ENV_PATH)
+
 app = Flask(
     __name__,
     template_folder=os.path.join(BUNDLE_DIR, "templates"),
     static_folder=os.path.join(BUNDLE_DIR, "static")
 )
 
-# Registro único del Blueprint de rutas
+# Llave de sesión persistente para evitar desincronización en subprocesos
+app.secret_key = os.environ.get("SECRET_KEY")
+
+# Registro único del Blueprint central de rutas
 app.register_blueprint(clips_bp)
 
-# Activar el traductor visual de peticiones HTTP
+# Traductor visual de peticiones y respuestas HTTP en consola
 configurar_logger_http(app)
 
 @app.route("/static/uploads/documentos/<path:filename>")
@@ -82,7 +85,7 @@ def servir_imagenes_subidas(filename):
 # Límite global amplio para soportar backups completos con multimedia: 250 MiB
 app.config["MAX_CONTENT_LENGTH"] = 250 * 1024 * 1024
 
-# Blindaje de identidad: Política de cookies de sesión
+# Blindaje de sesión: mitigación de secuestro y ataques XSS/CSRF
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = False
@@ -91,7 +94,7 @@ app.config["SESSION_COOKIE_SECURE"] = False
 @app.errorhandler(413)
 def error_archivo_demasiado_grande(e):
     ip_origen = request.remote_addr
-    print(f"\n\033[91m[ALERTA DE SEGURIDAD :: OVERFLOW]\033[0m Carga masiva interceptada (> 250 MB) desde IP: {ip_origen}")
+    print(f"\n\033[91m✖ [PCM :: ALERTA DE SEGURIDAD]\033[0m Carga masiva interceptada (> 250 MB) desde IP: {ip_origen}")
     return jsonify({
         "ok": False,
         "error": "El archivo excede el tamaño máximo permitido por el servidor (250 MB)."
@@ -99,9 +102,10 @@ def error_archivo_demasiado_grande(e):
 
 
 # ==============================================================================
-# SECCIÓN 3: MOTOR DE TELEMETRÍA Y UTILIDADES DE INTEGRIDAD
+# SECCIÓN 3: MOTOR DE TELEMETRÍA (KLOG) Y UTILIDADES DE INTEGRIDAD
 # ==============================================================================
 def klog(estado, mensaje, delay=0.07):
+    """Emite líneas de telemetría de arranque estilo kernel con formateo ANSI."""
     prefijos = {
         "ok":   "  [\033[92m  OK  \033[0m] ",
         "info": "  [\033[94m INFO \033[0m] ",
@@ -118,7 +122,7 @@ def klog(estado, mensaje, delay=0.07):
 
 
 def calcular_sha256_local(ruta):
-    """Calcula el hash SHA-256 en bloques de 64 KB de forma segura."""
+    """Calcula el hash SHA-256 en bloques de 64 KB de forma segura mediante streaming."""
     if not os.path.exists(ruta):
         return None
     try:
@@ -131,8 +135,30 @@ def calcular_sha256_local(ruta):
         return None
 
 
+def resolver_ip_lan():
+    """Resuelve la dirección IP en la red local de forma tolerante a entornos 100% offline."""
+    ip_detectada = "127.0.0.1"
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("10.255.255.255", 1))
+        ip_detectada = sock.getsockname()[0]
+    except Exception:
+        try:
+            ip_detectada = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            pass
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+    return ip_detectada
+
+
 # ==============================================================================
-# SECCIÓN 4: GESTIÓN, RESILIENCIA Y AUTORREPARACIÓN DE ENTORNO (.ENV)
+# SECCIÓN 4: GESTOR DE RESILIENCIA Y AUTORREPARACIÓN DE ENTORNO (.ENV)
 # ==============================================================================
 VALORES_PREDETERMINADOS = {
     "SECRET_KEY": lambda: secrets.token_hex(32),
@@ -148,7 +174,7 @@ VALORES_PREDETERMINADOS = {
     # Módulo de Sincronización BYOC (E2EE)
     "SYNC_HABILITADO": "false",
     "SYNC_CARPETA": "",
-    "SYNC_MODO_CIFRADO": "auto",  # 'auto' o 'libre'
+    "SYNC_MODO_CIFRADO": "auto",  # 'auto', 'manual' o 'libre'
     "SYNC_CLAVE": lambda: secrets.token_hex(32),
     "SYNC_AUTO_APLICAR": "true",
     "SYNC_NOMBRE_DISPOSITIVO": lambda: socket.gethostname(),
@@ -156,12 +182,14 @@ VALORES_PREDETERMINADOS = {
 }
 
 def serializar_valor_env(valor):
+    """Sanitiza y serializa un valor para su almacenamiento seguro dentro de .env."""
     v_str = str(valor).replace("\r", "").replace("\n", "")
     v_str = v_str.replace("\\", "\\\\").replace("'", r"\'")
     return f"'{v_str}'"
 
 
 def escribir_env_seguro(ruta_env, mapa_valores):
+    """Escribe los ajustes en disco con reintentos para mitigar bloqueos transitorios del SO."""
     for _ in range(4):
         try:
             with open(ruta_env, "w", encoding="utf-8") as f:
@@ -174,10 +202,15 @@ def escribir_env_seguro(ruta_env, mapa_valores):
 
 
 def sanitizar_y_reparar_env(ruta_env):
+    """
+    Inspecciona y repara el archivo de variables .env:
+    - Aísla configuraciones dañadas por bytes nulos (sabotaje binario).
+    - Aprovisiona llaves faltantes respetando valores predeterminados.
+    - Sanea rangos numéricos de puertos y formatos de interfaces de red.
+    """
     valores = {}
     archivo_danado = False
     env_existia = os.path.exists(ruta_env)
-    
     ya_inicializado = os.path.exists(DB_PATH)
 
     if env_existia:
@@ -213,7 +246,7 @@ def sanitizar_y_reparar_env(ruta_env):
 
     val_init = valores.get("SISTEMA_INICIALIZADO")
     if val_init is not None and str(val_init).strip("'\"").lower() == "false" and os.path.exists(DB_PATH):
-        advertencias.append("Inconsistencia: Base de datos activa pero SISTEMA_INICIALIZADO='false'. Corrigiendo a 'true'...")
+        advertencias.append("Inconsistencia: Base de datos activa pero SISTEMA_INICIALIZADO='false'. Normalizando a 'true'...")
         valores["SISTEMA_INICIALIZADO"] = "true"
         hubo_cambios = True
 
@@ -265,10 +298,15 @@ def sanitizar_y_reparar_env(ruta_env):
 # SECCIÓN 5: AUDITORÍA AVANZADA DE INTEGRIDAD SQLITE (BLINDADA CONTRA CAOS)
 # ==============================================================================
 def auditar_integridad_db(db_path):
-    if not os.path.exists(db_path):
-        return "ausente", 0, 0, 0, 0
-
-    if os.path.getsize(db_path) == 0:
+    """
+    Audita exhaustivamente la base de datos relacional local:
+    - Retorna 'ausente' si el archivo no existe o pesa 0 bytes.
+    - Retorna 'bloqueada' si otro proceso retiene un bloqueo exclusivo en disco.
+    - Retorna 'corrupta' ante fallo estructural de páginas o cabecera mágica.
+    - Retorna 'incompleta' si falta alguna de las tablas maestras obligatorias.
+    - Retorna 'ok' junto con el conteo de registros si la estructura es sólida.
+    """
+    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
         return "ausente", 0, 0, 0, 0
 
     conn = None
@@ -328,9 +366,10 @@ def auditar_integridad_db(db_path):
 
 
 # ==============================================================================
-# SECCIÓN 6: SANEAMIENTO DEL SISTEMA DE ARCHIVOS Y PURGA DE TEMPORALES
+# SECCIÓN 6: SANEAMIENTO DEL SISTEMA DE ARCHIVOS Y PURGA DE RESIDUOS
 # ==============================================================================
 def sanear_directorios_y_archivos(ya_inicializado=False):
+    """Verifica directorios requeridos y purga archivos temporales o huérfanos residuales."""
     directorios = [
         ("templates", os.path.join(DIRECTORIO_RAIZ, "templates")),
         ("static", os.path.join(DIRECTORIO_RAIZ, "static")),
@@ -342,7 +381,7 @@ def sanear_directorios_y_archivos(ya_inicializado=False):
         if not os.path.exists(ruta):
             os.makedirs(ruta, exist_ok=True)
             if ya_inicializado and nombre == "uploads/documentos":
-                klog("warn", "Directorio multimedia ausente o eliminado externamente: /uploads/documentos")
+                klog("warn", "Directorio multimedia ausente: /uploads/documentos")
                 klog("init", "Regenerando carpeta vacía para permitir nuevas subidas...")
             else:
                 klog("init", f"Directorio aprovisionado: /{nombre}")
@@ -371,7 +410,7 @@ def sanear_directorios_y_archivos(ya_inicializado=False):
             except Exception:
                 pass
     if purgados_sync > 0:
-        klog("warn", f"Saneamiento: {purgados_sync} archivo(s) temporales residuales de sincronización eliminados.")
+        klog("warn", f"Saneamiento: {purgados_sync} archivo(s) temporales residuales de sync eliminados.")
 
 
 # ==============================================================================
@@ -393,7 +432,7 @@ if __name__ == "__main__":
         print("=" * 65)
         time.sleep(0.10)
 
-        # 1. Auditoría y aprovisionamiento del entorno .env
+        # 1. Auditoría y aprovisionamiento de entorno .env
         faltantes, ya_inicializado, env_existia, archivo_danado, advertencias = sanitizar_y_reparar_env(ENV_PATH)
 
         if not env_existia:
@@ -420,14 +459,7 @@ if __name__ == "__main__":
             else:
                 klog("ok", "Archivo .env verificado: integridad completa.")
 
-        try:
-            load_dotenv(ENV_PATH, override=True)
-        except Exception:
-            pass
-
-        app.secret_key = os.environ.get("SECRET_KEY")
-
-        # --- Verificación de Entropía y Longitud de Claves Maestras ---
+        # 2. Verificación de Entropía Criptográfica en Llaves Maestras
         master_val = os.environ.get("MASTER_KEY", "").strip("'\"")
         sync_clave_val = os.environ.get("SYNC_CLAVE", "").strip("'\"")
 
@@ -440,20 +472,18 @@ if __name__ == "__main__":
             klog("ok", "Llaves criptográficas maestras activas (256 bits).")
         else:
             bits_master = len(master_val.encode("utf-8")) * 8
-            klog("info", f"Llave maestra manual activa ({bits_master} bits / clave personalizada detectada).")
-            klog("info", f"clave maestra analizada ({len(master_val)} caracteres detectada).")
+            klog("info", f"Llave maestra manual activa: {bits_master} bits ({len(master_val)} car. / contraseña personalizada).")
 
         sync_activa_check = os.environ.get("SYNC_HABILITADO", "false").strip().lower() == "true"
         if sync_activa_check and not sync_es_256 and os.environ.get("SYNC_MODO_CIFRADO", "auto") != "libre":
             bits_sync = len(sync_clave_val.encode("utf-8")) * 8
-            klog("info", f"SYNC_CLAVE manual detectada de ({bits_sync} bits).")
-            klog("info", f"SYNC_CLAVE analizada ({len(sync_clave_val)} caracteres detectados).")
+            klog("info", f"SYNC_CLAVE opera con clave manual: {bits_sync} bits ({len(sync_clave_val)} car.).")
 
-        # 2. Comprobación y saneamiento de almacenamiento físico
+        # 3. Comprobación y saneamiento de almacenamiento físico
         klog("init", "Verificando estructura de almacenamiento...")
         sanear_directorios_y_archivos(ya_inicializado=ya_inicializado)
 
-        # 3. Auditoría estructural local inicial de SQLite
+        # 4. Auditoría estructural de base de datos SQLite
         estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
 
         if estado_db == "bloqueada":
@@ -462,7 +492,7 @@ if __name__ == "__main__":
             time.sleep(2)
             estado_db, n_clips, n_codigos, n_resumenes, n_docs = auditar_integridad_db(DB_PATH)
             if estado_db == "bloqueada":
-                klog("fail", "Imposible acceder a pcm.db. Cierre el proceso que mantiene el bloqueo exclusivo.")
+                klog("fail", "Imposible acceder a pcm.db. Cierre el proceso que mantiene el bloqueo.")
                 sys.exit(1)
 
         if estado_db == "corrupta":
@@ -486,7 +516,7 @@ if __name__ == "__main__":
                         pass
             estado_db = "ausente"
 
-        # 4. Protocolo de Sincronización BYOC y Disaster Recovery
+        # 5. Protocolo de Sincronización BYOC y Disaster Recovery
         sync_activa = os.environ.get("SYNC_HABILITADO", "false").strip().lower() == "true"
         carpeta_nube = os.environ.get("SYNC_CARPETA", "").strip()
         auto_aplicar = os.environ.get("SYNC_AUTO_APLICAR", "false").strip().lower() == "true"
@@ -527,7 +557,6 @@ if __name__ == "__main__":
                         boveda_bloqueada_corrupta = True
                         klog("fail", f"Inconsistencia en la nube: Existe .meta (#{rev_remota}) pero falta 'pcm_vault.zip'.")
 
-                    # CASO RESCATE: Base local ausente pero hay copia en la nube
                     elif estado_db == "ausente":
                         klog("warn", f"Base local no disponible. Ejecutando Rescate Automático (#{rev_remota} desde '{origen}')...")
                         exito, msg = sync_manager.importar_boveda_cifrada(carpeta_nube, DB_PATH, UPLOADS_DIR, clave)
@@ -547,7 +576,6 @@ if __name__ == "__main__":
                             boveda_bloqueada_corrupta = True
                             klog("fail", f"Fallo al rescatar desde la nube (Firma SHA-256 o clave errónea): {msg}")
 
-                    # CASO ACTUALIZACIÓN HABITUAL
                     elif rev_remota > rev_local:
                         klog("info", f"Revisión remota #{rev_remota} disponible desde '{origen}' (Local: #{rev_local}).")
                         if auto_aplicar:
@@ -574,7 +602,7 @@ if __name__ == "__main__":
                             boveda_bloqueada_corrupta = True
                             klog("fail", f"Alerta en la nube: Existe .meta (#{rev_local}) pero 'pcm_vault.zip' está ausente o vacío.")
                         else:
-                            hash_esperado = meta.get("hash_sha256") or meta.get("sha256") or meta.get("hash")
+                            hash_esperado = meta.get("hash_sha256") or meta.get("sha256") or meta.get("hash") or meta.get("checksum")
                             if hash_esperado:
                                 hash_real = calcular_sha256_local(ruta_zip_fisica)
                                 if hash_real != hash_esperado:
@@ -586,7 +614,7 @@ if __name__ == "__main__":
                             else:
                                 klog("ok", f"Bóveda sincronizada al día con la nube (Revisión #{rev_local}).")
 
-        # 5. Inicialización y Autocuración de Esquema
+        # 6. Inicialización y Autocuración de Esquema de Base de Datos
         if estado_db == "ausente" and not recuperada_de_nube:
             klog("info", "Generando base de datos pcm.db limpia e indexada...")
             database.inicializar_db()
@@ -602,7 +630,7 @@ if __name__ == "__main__":
             database.inicializar_db()
             klog("ok", f"Base verificada: {n_clips} clips, {n_codigos} cod, {n_resumenes} notas, {n_docs} docs.")
 
-        # 6. Auditoría cruzada de sincronización y modificaciones
+        # 7. Auditoría cruzada de sincronización y modificaciones locales
         if sync_activa and carpeta_nube:
             ruta_sync = os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_SYNC)
             ultimo_sync_ts = 0.0
@@ -635,7 +663,7 @@ if __name__ == "__main__":
         else:
             klog("info", "Sincronización BYOC desactivada (Operando en modo local independiente).")
 
-        # 7. Verificación de última instantánea de respaldo manual (JSON/ZIP)
+        # 8. Verificación de última instantánea de respaldo manual (JSON/ZIP)
         ruta_backup = os.path.join(DIRECTORIO_RAIZ, RUTA_ULTIMO_BACKUP)
         if os.path.exists(ruta_backup):
             try:
@@ -648,7 +676,7 @@ if __name__ == "__main__":
         else:
             klog("info", "No se detecta snapshot de respaldo manual previo.")
 
-        # 8. Detección y advertencia de credenciales por defecto
+        # 9. Detección y advertencia de credenciales temporales por defecto
         contrasena_ya_mostrada = os.environ.get("CONTRASENA_MOSTRADA", "false").strip().lower() == "true"
         if os.environ.get("APP_PASSWORD") == "cambiame" and not contrasena_ya_mostrada:
             print("\n" + "!" * 65)
@@ -661,7 +689,7 @@ if __name__ == "__main__":
         print(f" [i] CONSOLA DE ADMINISTRACIÓN DISPONIBLE: {comando_cli}")
         print("-" * 65)
 
-    # Configuración de red y modo WSGI
+    # Configuración de red y modo del servidor WSGI (Sincronización para proceso padre e hijo)
     load_dotenv(ENV_PATH, override=True)
     app.secret_key = os.environ.get("SECRET_KEY")
 
@@ -675,18 +703,7 @@ if __name__ == "__main__":
     if not es_reloader:
         klog("info", f"Modo Debug: {debug_mode}")
         if host == "0.0.0.0":
-            ip_lan = "127.0.0.1"
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("10.255.255.255", 1))
-                ip_lan = s.getsockname()[0]
-                s.close()
-            except Exception:
-                try:
-                    ip_lan = socket.gethostbyname(socket.gethostname())
-                except Exception:
-                    pass
-
+            ip_lan = resolver_ip_lan()
             klog("ok", f"Servidor Local:   http://127.0.0.1:{port}")
             klog("ok", f"Acceso LAN Red:   http://{ip_lan}:{port}")
             klog("info", "Acceso multidispositivo habilitado en la red local.")
